@@ -83,14 +83,13 @@ class FlussonicClient(_WriteBlocker):
 
     # ── URL helpers (no API call, no credentials) ──────────────────────────────
 
-    def stream_hls_url(self, stream_name: str) -> str:
+    def stream_hls_url(self, stream_name: str, hls_path: str = "index.m3u8") -> str:
         """
         Build the public HLS playlist URL for a stream.
         No auth is embedded — credentials are never sent to the client.
-        If Flussonic backend-auth is configured, callers should append
-        ?token={nexora_playback_jwt} to this URL.
+        hls_path is either 'index.m3u8' (default) or 'video.m3u8'.
         """
-        return f"{self._base}/{stream_name}/index.m3u8"
+        return f"{self._base}/{stream_name}/{hls_path}"
 
     def stream_dash_url(self, stream_name: str) -> str:
         """Build the public DASH manifest URL."""
@@ -176,11 +175,7 @@ _client_instance: FlussonicClient | None = None
 
 
 def get_flussonic_client() -> FlussonicClient:
-    """
-    Return the module-level FlussonicClient instance.
-    Reads credentials from app config (which reads from .env).
-    Safe to call from FastAPI dependencies — credentials are never returned.
-    """
+    """Primary node (ec-main) client. Safe for FastAPI module-level use."""
     global _client_instance
     if _client_instance is None:
         from app.config import get_settings
@@ -191,3 +186,42 @@ def get_flussonic_client() -> FlussonicClient:
             password=s.flussonic_readonly_password,
         )
     return _client_instance
+
+
+# ── Per-node client registry ───────────────────────────────────────────────────
+
+_node_clients: dict[str, FlussonicClient] = {}
+
+
+def get_flussonic_node_client(node_id: str) -> FlussonicClient | None:
+    """Return the FlussonicClient for a specific node ID.
+
+    Supported nodes: 'ec-main', 'co-main'.
+    Returns None if the node is not configured (missing base_url or credentials).
+    Phase 4.4 will replace this with a full FlussonicNodeRegistry.
+    """
+    global _node_clients
+    if node_id in _node_clients:
+        return _node_clients[node_id]
+
+    from app.config import get_settings
+    s = get_settings()
+
+    if node_id == "ec-main":
+        client = FlussonicClient(
+            base_url=s.flussonic_base_url,
+            user=s.flussonic_readonly_user,
+            password=s.flussonic_readonly_password,
+        )
+    elif node_id == "co-main":
+        client = FlussonicClient(
+            base_url=s.flussonic_co_main_base_url,
+            user=s.flussonic_co_main_user,
+            password=s.flussonic_co_main_password,
+        )
+    else:
+        logger.warning("Unknown Flussonic node_id: %s", node_id)
+        return None
+
+    _node_clients[node_id] = client
+    return client

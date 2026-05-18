@@ -18,6 +18,8 @@ class Channel(Base):
     category: Mapped[str | None] = mapped_column(String(64))
     logo_url: Mapped[str | None] = mapped_column(String(512))
     stream_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    flussonic_node: Mapped[str] = mapped_column(String(64), nullable=False, default="ec-main", index=True)
+    hls_path: Mapped[str] = mapped_column(String(32), nullable=False, default="index.m3u8")
     source_type: Mapped[str] = mapped_column(String(16), nullable=False, default="manual")
     source_url: Mapped[str | None] = mapped_column(String(512))
     epg_id: Mapped[str | None] = mapped_column(String(128))

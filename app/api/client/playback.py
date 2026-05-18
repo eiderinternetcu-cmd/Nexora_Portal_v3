@@ -16,11 +16,10 @@ from app.models.subscriber import Subscriber
 from app.schemas.client import PlaybackAuthorizeRequest, PlaybackResponse
 from app.services.stream_auth_service import StreamAuthService
 from app.services.channel_service import ChannelService
-from app.integrations.flussonic_client import get_flussonic_client
+from app.integrations.flussonic_client import get_flussonic_node_client
+from app.models.channel import Channel
 
 router = APIRouter(prefix="/playback", tags=["Client Playback"])
-
-_flussonic = get_flussonic_client()
 
 
 def _get_ip(request: Request) -> str:
@@ -30,14 +29,26 @@ def _get_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
-def _resolve_playback_url(stream_key: str | None, source_url: str | None) -> str | None:
+def _resolve_playback_url(channel: Channel | None, stream_key: str | None) -> str | None:
+    """Build the HLS URL using the channel's assigned Flussonic node.
+
+    Priority:
+      1. FlussonicClient for channel.flussonic_node → stream_key URL
+      2. channel.source_url (stored fallback — full URL from import)
+      3. None → frontend shows error
+    Flussonic credentials are never included in the returned URL.
     """
-    Build the playback URL without exposing any Flussonic credentials.
-    Priority: Flussonic URL > DB source_url > None.
-    """
-    if stream_key and _flussonic.is_configured:
-        return _flussonic.stream_hls_url(stream_key)
-    return source_url
+    if channel is None:
+        return None
+
+    node_id = channel.flussonic_node or "ec-main"
+    client = get_flussonic_node_client(node_id)
+
+    if stream_key and client and client.is_configured:
+        hls_path = channel.hls_path or "index.m3u8"
+        return client.stream_hls_url(stream_key, hls_path)
+
+    return channel.source_url
 
 
 @router.post("/authorize", response_model=PlaybackResponse)
@@ -81,7 +92,7 @@ async def authorize_playback(
         expires_in=result.expires_in,
         channel_id=data.channel_id,  # echo channel_key back — never stream_key
         subscriber_id=str(result.subscriber_id),
-        playback_url=_resolve_playback_url(stream_key, ch.source_url if ch else None),
+        playback_url=_resolve_playback_url(ch, stream_key),
     )
 
 
@@ -114,5 +125,5 @@ async def reissue_playback_token(
         expires_in=result.expires_in,
         channel_id=channel_id,
         subscriber_id=str(result.subscriber_id),
-        playback_url=_resolve_playback_url(ch.stream_key, ch.source_url),
+        playback_url=_resolve_playback_url(ch, ch.stream_key),
     )

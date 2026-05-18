@@ -47,10 +47,16 @@ class Settings(BaseSettings):
 
     # Flussonic Media Server — read-only integration
     # Credentials live ONLY here. Never returned to clients.
+    # ec-main (primary node — Ecuador)
     flussonic_base_url: str = ""
     flussonic_readonly_user: str = ""
     flussonic_readonly_password: str = ""
-    flussonic_readonly: bool = True  # guard: disables write methods
+    flussonic_readonly: bool = True
+
+    # co-main (secondary node — Colombia)
+    flussonic_co_main_base_url: str = ""
+    flussonic_co_main_user: str = ""
+    flussonic_co_main_password: str = ""
 
     @property
     def database_url(self) -> str:
