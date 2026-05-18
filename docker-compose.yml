@@ -7,6 +7,11 @@ services:
     ports:
       - "8000:8000"
     env_file: .env
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
     depends_on:
       postgres:
         condition: service_healthy
@@ -53,6 +58,19 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    networks:
+      - nexora_net
+    restart: unless-stopped
+
+  web_player:
+    build:
+      context: ./web_player
+      dockerfile: Dockerfile
+    container_name: nexora_web_player
+    ports:
+      - "5173:80"
+    depends_on:
+      - api
     networks:
       - nexora_net
     restart: unless-stopped

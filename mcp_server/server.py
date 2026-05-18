@@ -5,7 +5,10 @@ local, verificar servicios y ejecutar operaciones seguras sin tocar producción.
 """
 import json
 import os
+import platform
 import re
+import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -376,6 +379,172 @@ def read_recent_logs(service: str = "api", lines: int = 50) -> str:
         ["docker", "compose", "logs", service, f"--tail={lines}", "--no-color"],
         timeout=15,
     )
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Web Player (Vite dev server)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_WEB_PLAYER_DIR = PROJECT_ROOT / "web_player"
+_WEB_PLAYER_PORT: int = _cfg.get("web_player", {}).get("port", 5173)
+_WEB_PLAYER_PID_FILE = Path(__file__).parent / ".web_player.pid"
+
+
+def _find_npm() -> str | None:
+    npm = shutil.which("npm")
+    if npm:
+        return npm
+    if platform.system() == "Windows":
+        for candidate in [
+            Path("C:/Program Files/nodejs/npm.cmd"),
+            Path(os.environ.get("APPDATA", "X")) / "../Local/Programs/nodejs/npm.cmd",
+        ]:
+            if candidate.exists():
+                return str(candidate)
+    return None
+
+
+def _port_listening(port: int) -> bool:
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=1):
+            return True
+    except OSError:
+        return False
+
+
+def _pid_on_port(port: int) -> int | None:
+    try:
+        if platform.system() == "Windows":
+            result = subprocess.run(
+                ["netstat", "-ano"], capture_output=True, text=True, timeout=10
+            )
+            for line in result.stdout.splitlines():
+                if f":{port}" in line and "LISTENING" in line:
+                    parts = line.split()
+                    if parts:
+                        try:
+                            return int(parts[-1])
+                        except ValueError:
+                            pass
+        else:
+            result = subprocess.run(
+                ["lsof", "-ti", f":{port}"], capture_output=True, text=True, timeout=10
+            )
+            pid_str = result.stdout.strip()
+            if pid_str:
+                return int(pid_str.split()[0])
+    except Exception:
+        pass
+    return None
+
+
+@mcp.tool()
+def check_web_player() -> str:
+    """Verifica si el Vite dev server está corriendo en localhost:5173."""
+    running = _port_listening(_WEB_PLAYER_PORT)
+    pid = _pid_on_port(_WEB_PLAYER_PORT) if running else None
+    lines = [f"Web player: {'RUNNING' if running else 'STOPPED'}"]
+    if running:
+        lines.append(f"URL: http://localhost:{_WEB_PLAYER_PORT}")
+    if pid:
+        lines.append(f"PID: {pid}")
+    if not running:
+        lines.append("Usa start_web_player para iniciarlo.")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def start_web_player() -> str:
+    """
+    Inicia el Vite dev server (web_player/) como proceso en segundo plano.
+    URL: http://localhost:5173
+    Usa stop_web_player para detenerlo.
+    """
+    if not _cfg["policy"].get("allow_web_player", True):
+        return "ERROR: start_web_player deshabilitado en config.yaml (policy.allow_web_player: false)."
+
+    if _port_listening(_WEB_PLAYER_PORT):
+        pid = _pid_on_port(_WEB_PLAYER_PORT)
+        return (
+            f"Web player ya está corriendo en http://localhost:{_WEB_PLAYER_PORT}"
+            + (f" (PID {pid})" if pid else "")
+        )
+
+    if not _WEB_PLAYER_DIR.exists():
+        return f"ERROR: {_WEB_PLAYER_DIR} no existe."
+
+    npm = _find_npm()
+    if not npm:
+        return (
+            "ERROR: npm no encontrado en PATH.\n"
+            "Instala Node.js y asegúrate de que npm esté disponible en el PATH del sistema."
+        )
+
+    try:
+        kwargs: dict = {
+            "cwd": str(_WEB_PLAYER_DIR),
+            "stdout": subprocess.DEVNULL,
+            "stderr": subprocess.DEVNULL,
+            "stdin": subprocess.DEVNULL,
+        }
+        if platform.system() == "Windows":
+            kwargs["creationflags"] = (
+                subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+            )
+        else:
+            kwargs["start_new_session"] = True
+
+        proc = subprocess.Popen([npm, "run", "dev"], **kwargs)
+        _WEB_PLAYER_PID_FILE.write_text(str(proc.pid))
+
+        # Poll up to 15s for port to come up
+        for _ in range(15):
+            time.sleep(1)
+            if _port_listening(_WEB_PLAYER_PORT):
+                return (
+                    f"Web player iniciado (PID {proc.pid})\n"
+                    f"URL: http://localhost:{_WEB_PLAYER_PORT}"
+                )
+
+        alive = proc.poll() is None
+        return (
+            f"Web player lanzado (PID {proc.pid}, {'proceso activo' if alive else 'proceso terminó'})\n"
+            f"Puerto {_WEB_PLAYER_PORT} aún no responde. Espera unos segundos y usa check_web_player."
+        )
+    except Exception as exc:
+        return f"Error al iniciar web player: {type(exc).__name__}: {exc}"
+
+
+@mcp.tool()
+def stop_web_player() -> str:
+    """Detiene el Vite dev server que corre en localhost:5173."""
+    pid = _pid_on_port(_WEB_PLAYER_PORT)
+
+    if not pid and _WEB_PLAYER_PID_FILE.exists():
+        try:
+            pid = int(_WEB_PLAYER_PID_FILE.read_text().strip())
+        except Exception:
+            pass
+
+    if not pid:
+        _WEB_PLAYER_PID_FILE.unlink(missing_ok=True)
+        return "Web player no está corriendo."
+
+    try:
+        if platform.system() == "Windows":
+            result = subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(pid)],
+                capture_output=True, text=True, timeout=10,
+            )
+            msg = (result.stdout.strip() or result.stderr.strip() or "OK").splitlines()[0]
+        else:
+            import signal
+            os.kill(pid, signal.SIGTERM)
+            msg = f"SIGTERM -> PID {pid}"
+
+        _WEB_PLAYER_PID_FILE.unlink(missing_ok=True)
+        return f"Web player detenido (PID {pid}).\n{msg}"
+    except Exception as exc:
+        return f"Error al detener PID {pid}: {type(exc).__name__}: {exc}"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Entrypoint

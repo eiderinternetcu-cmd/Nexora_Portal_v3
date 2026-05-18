@@ -12,7 +12,7 @@ class ClientLoginRequest(BaseModel):
     model: str | None = Field(None, max_length=128)
     brand: str | None = Field(None, max_length=64)
     app_version: str | None = Field(None, max_length=32)
-    os_version: str | None = Field(None, max_length=32)
+    os_version: str | None = Field(None, max_length=512)
 
 
 class ClientTokenResponse(BaseModel):
@@ -85,4 +85,4 @@ class ClientDeviceRegister(BaseModel):
     brand: str | None = Field(None, max_length=64)
     device_type: str | None = Field(None, max_length=32)
     app_version: str | None = Field(None, max_length=32)
-    os_version: str | None = Field(None, max_length=32)
+    os_version: str | None = Field(None, max_length=512)

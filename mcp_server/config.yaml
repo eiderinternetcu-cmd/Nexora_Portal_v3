@@ -28,8 +28,13 @@ docker:
     - postgres
     - redis
 
+web_player:
+  port: 5173
+  dir: "web_player"
+
 policy:
   allow_alembic_upgrade: true   # true = permitir upgrade head en dev local
   allow_pytest: true
+  allow_web_player: true        # true = permitir start/stop del Vite dev server
   max_log_lines: 200
   modified_files_max_hours: 168  # 7 días
