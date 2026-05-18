@@ -18,7 +18,7 @@ class Device(Base):
     )
 
     # ── Primary identifier ────────────────────────────────────────────────────
-    # Para STB/MAG: MAC address. Para apps: android_id o UUID generado por la app.
+    # MAC address para dispositivos físicos; android_id o UUID para apps.
     device_id: Mapped[str] = mapped_column(String(128), unique=True, nullable=False, index=True)
 
     # ── Extended fingerprint ──────────────────────────────────────────────────

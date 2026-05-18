@@ -38,9 +38,9 @@ npm install
 npm run dev   # http://localhost:5173 (proxy /api/* -> :8000)
 ```
 
-## Fase actual: 3d Flussonic Integration — COMPLETADA ✅
+## Fase actual: 3f Multi-device LAN — COMPLETADA ✅
 
-### Flujo de playback validado
+### Flujo de playback validado (browser + LAN)
 
 ```
 login -> GET canales -> POST /playback/authorize -> hls.js reproduce URL Flussonic
@@ -53,6 +53,8 @@ http://181.78.246.211:8002/ECUADOR_TV/index.m3u8
 
 Nexora **no hace proxy de video** — el cliente reproduce directo desde Flussonic.  
 Credenciales Flussonic **nunca** salen del backend.
+
+Acceso multi-dispositivo validado: Windows (`http://127.0.0.1:5173`) y Mac en LAN (`http://192.168.100.221`).
 
 ## Seguridad
 
@@ -81,5 +83,5 @@ Credenciales Flussonic **nunca** salen del backend.
 |---------|-----------|
 | `/api/client/*` | App moderna (web, Android TV, iOS) |
 | `/api/admin/*` | Panel de administración + inspección Flussonic |
-| `/api/stb/*` | Autenticación STB + callback Flussonic backend-auth |
-| `/api/v1/*` | Legacy compat (admin/reseller) |
+| `/api/stb/*` | Autenticación de dispositivo + callback Flussonic backend-auth |
+| `/api/v1/*` | Compatibilidad admin/reseller — sin flujo nuevo aquí |

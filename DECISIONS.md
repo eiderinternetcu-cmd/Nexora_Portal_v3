@@ -1,5 +1,5 @@
 # DECISIONS.md — Decisiones Técnicas Nexora
-_Last updated: 2026-05-17_
+_Last updated: 2026-05-18_
 
 ---
 
@@ -9,11 +9,11 @@ _Last updated: 2026-05-17_
 **Estado**: FIRME — no revertir
 
 ### Motivación
-El portal legacy (Nexora Portal PHP) corre en PHP 5.6 con un core ionCube-encoded (9 archivos, magic bytes `HR+cP...`). El loader ionCube es version-specific y no puede decodificarse con PHP 7+. Por lo tanto, migrar PHP no es viable sin reescribir el core. La decisión fue construir el nuevo core desde cero en Python.
+Nexora es una plataforma OTT moderna (web, Android TV, iOS). El nuevo core se construyó desde cero en Python para tener control total sobre autenticación, concurrencia, dispositivos y playback Flussonic sin depender de stacks legacy.
 
 ### Regla
-> **No construir nuevo código crítico en PHP 8.**
-> El PHP legacy queda SOLO como referencia temporal para entender el protocolo STB.
+> **No construir nuevo código crítico fuera del stack aprobado.**
+> El portal legacy (PHP) se retiene temporalmente solo para migración de datos — no para lógica nueva.
 
 ---
 
@@ -87,27 +87,25 @@ El `jti` es la clave en Redis. En blacklist: `nexora:blacklist:{jti}`.
 
 ---
 
-## PHP LEGACY — REGLAS DE COEXISTENCIA
+## PORTAL LEGACY — RETENCIÓN TEMPORAL
 
-1. El portal PHP sigue corriendo en PHP 5.6 (Docker o servidor dedicado)
-2. Los endpoints STB (`/portal/server/load.php`) siguen respondiendo como siempre para compatibilidad con MAG/STB físicos
-3. El nuevo core Python NO reemplaza PHP de golpe — los adaptadores STB se crean en Fase 3
-4. **No modificar el core ionCube** del portal PHP
-5. **No migrar MySQL a PostgreSQL** para el portal PHP — son bases de datos separadas
-6. Los nuevos módulos (nuevos suscriptores, nuevos dispositivos) se crean en PostgreSQL via FastAPI
+El portal PHP legacy se mantiene activo únicamente para:
+- Migración gradual de datos existentes a PostgreSQL
+- Referencia de esquemas de suscriptores heredados
+
+No se escribe lógica nueva en PHP. Todo flujo nuevo pasa por el Modern Client API (`/api/client/*`).
 
 ---
 
-## SEPARACIÓN DE DOMINIOS (PENDIENTE — Fase 2)
+## SEPARACIÓN DE DOMINIOS
 
 ```
+/api/client/    → app moderna (web, Android TV, iOS) — Modern Client API
 /api/admin/     → solo role=admin, gestión del sistema
-/api/subscriber/ → self-service del suscriptor (futura app móvil)
-/api/stb/       → protocolo MAG/STB (Fase 3, compatibilidad Stalker)
+/api/stb/       → autenticación de dispositivo + callback Flussonic backend-auth
+/api/v1/        → compatibilidad admin/reseller legacy (sin flujo nuevo aquí)
 /internal/      → inter-service, no expuesto públicamente
 ```
-
-Actualmente todos los endpoints están bajo `/api/v1/` (temporal).
 
 ---
 
@@ -135,7 +133,9 @@ Regla:
 - ❌ No escribir lógica de negocio nueva en PHP
 - ❌ No usar python-jose (Rust dependency)
 - ❌ No usar asyncpg (Rust compilation)
-- ❌ No empezar UI todavía (no frontend hasta Fase 2 completada)
-- ❌ No tocar el ionCube core del portal PHP
+- ❌ No empezar UI en este repo — está en `e:/WEBSITE/nexora_app`
 - ❌ No hacer migraciones directo en producción — siempre entorno clonado primero
 - ❌ No commitear `.env` real al repositorio
+- ❌ No exponer credenciales Flussonic en ninguna respuesta de API
+- ❌ No hacer proxy de video desde Nexora — el cliente reproduce directo desde Flussonic
+- ❌ No exponer `stream_key` al cliente — solo `channel_key`

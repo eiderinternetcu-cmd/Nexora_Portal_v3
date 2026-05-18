@@ -1,7 +1,6 @@
 """
-STBService — valida suscriptores para el protocolo STB/Stalker.
-Fase 1: validación de suscriptor activo y dispositivo.
-Fase 3: adaptador completo compatible con endpoints Stalker.
+STBService — valida suscriptores, dispositivos y sesiones IPTV.
+Usado por /api/client/playback/ y /api/stb/ (Flussonic backend-auth).
 """
 import uuid
 from datetime import datetime, timezone

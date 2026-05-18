@@ -7,7 +7,7 @@ Frontend Nexora-native para clientes web/TV. Consume exclusivamente:
 - `/api/client/playback/*`
 - `/api/client/profile/*`
 
-No contiene Stalker, MAG, Xtream, PHP legacy ni URLs permanentes de stream.
+Player OTT nativo de Nexora — consume exclusivamente el Modern Client API.
 
 ## Flujo de reproducción (Flussonic)
 
@@ -96,13 +96,12 @@ Suscripción activa hasta 2026-06-17.
 | Heartbeat autenticado | ✅ funcional |
 | Refresh token (rotación 90d) | ✅ funcional |
 | Logout | ✅ funcional |
-| hls.js reproducción en navegador | ⏳ pendiente validar |
+| hls.js reproducción en navegador | ✅ funcional |
 | Error handling HLS (stream DOWN) | ⏳ pendiente |
 | Signed URLs / backend-auth formal | ⏳ Fase 4 |
 
 ## Pendientes (Fase 4)
 
-1. Validar reproducción hls.js en navegador (Flussonic streams actualmente DOWN)
-2. Manejo de errores: stream DOWN, 401 en HLS URL, timeout
-3. Retry automático con backoff exponencial
-4. Signed URLs — Flussonic backend-auth via `/api/stb/auth/validate`
+1. Manejo de errores: stream DOWN, 401 en HLS URL, timeout
+2. Retry automático con backoff exponencial
+3. Signed URLs — Flussonic backend-auth via `/api/stb/auth/validate`

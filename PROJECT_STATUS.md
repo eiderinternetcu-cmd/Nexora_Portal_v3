@@ -5,8 +5,9 @@ _Last updated: 2026-05-18_
 
 ## FASE 1 — COMPLETADA ✅
 ## FASE 2 — COMPLETADA ✅
-## FASE 3 — EN PROGRESO 🔧
-- 3a ✅ · 3b ✅ · 3b.2 ✅ · 3c ✅ · 3c.1 Canal Catalog ✅ · **3d Flussonic Integration ✅**
+## FASE 3 — COMPLETADA ✅
+- 3a ✅ · 3b ✅ · 3b.2 ✅ · 3c ✅ · 3c.1 Canal Catalog ✅ · 3d Flussonic Integration ✅ · 3e Web Player Docker ✅ · **3f Multi-device LAN ✅**
+## FASE 4 — EN PROGRESO 🔧
 
 ---
 
@@ -15,12 +16,11 @@ _Last updated: 2026-05-18_
 ```
 nexora_api/
 ├── app/
-│   ├── config.py                          ✅  +flussonic_base_url, flussonic_readonly_user/password, flussonic_readonly
+│   ├── config.py                          ✅  +flussonic nodes multi-region
 │   ├── database.py                        ✅  psycopg3, async_sessionmaker
 │   ├── main.py                            ✅  FastAPI, CORS, RateLimit (96 rutas)
 │   ├── redis_client.py                    ✅  key helpers incl. key_client(), key_client_refresh()
 │   ├── models/
-│   │   ├── __init__.py                    ✅
 │   │   ├── user.py                        ✅  User, UserRole (admin|reseller)
 │   │   ├── subscriber.py                  ✅  Subscriber, SubscriberStatus
 │   │   ├── plan.py                        ✅  Plan
@@ -30,53 +30,16 @@ nexora_api/
 │   │   ├── session.py                     ✅  Session (IPTV DB sessions)
 │   │   └── channel.py                     ✅  Channel (channel_key, stream_key, source_type, category)
 │   ├── schemas/
-│   │   ├── auth.py                        ✅
-│   │   ├── common.py                      ✅
-│   │   ├── user.py                        ✅
-│   │   ├── subscriber.py                  ✅
-│   │   ├── device.py                      ✅
-│   │   ├── plan.py                        ✅
-│   │   ├── subscription.py               ✅  +SubscriptionAdminCreate
-│   │   ├── session.py                     ✅  SessionOut, SessionRevoke
-│   │   ├── playback.py                    ✅  PlayRequest, PlaybackTokenOut, ValidateRequest/Response
-│   │   ├── client.py                      ✅  login, token, profile, EPG, PlaybackResponse (+playback_url)
+│   │   ├── client.py                      ✅  FIXED: os_version max_length 32→512 (navigator.userAgent)
 │   │   └── channel.py                     ✅  ChannelPublic, ChannelAdminOut, StreamStatusOut
-│   ├── core/
-│   │   ├── security.py                    ✅  Argon2id, PyJWT + create_client_access/refresh_token
-│   │   ├── dependencies.py               ✅  get_current_user, require_admin, get_current_subscriber
-│   │   └── exceptions.py                  ✅  NexoraException, unauthorized, forbidden, locked
 │   ├── integrations/
-│   │   ├── __init__.py                    ✅  NUEVO Fase 3d
-│   │   └── flussonic_client.py            ✅  NUEVO Fase 3d — READ-ONLY, _WriteBlocker, singleton
-│   ├── services/
-│   │   ├── auth_service.py                ✅
-│   │   ├── session_service.py             ✅
-│   │   ├── connection_service.py          ✅  Redis ZSET concurrencia IPTV
-│   │   ├── stream_auth_service.py         ✅
-│   │   ├── subscription_service.py        ✅
-│   │   ├── client_auth_service.py         ✅
-│   │   ├── channel_service.py             ✅  list_active, get_by_key (READ ONLY)
-│   │   ├── user_service.py                ✅
-│   │   ├── subscriber_service.py         ✅
-│   │   ├── device_service.py              ✅  heartbeat: ZSET + active_connections
-│   │   ├── plan_service.py                ✅
-│   │   ├── audit_service.py               ✅
-│   │   └── stb_service.py                 ✅  authenticate_subscriber, validate_active, validate_device
+│   │   └── flussonic_client.py            ✅  READ-ONLY, _WriteBlocker, singleton
+│   ├── services/                          ✅  todos los servicios completos
 │   ├── api/
 │   │   ├── v1/                            ✅  /api/v1/ — legacy compat
 │   │   ├── stb/                           ✅  /api/stb/ — heartbeat, register, connections, playback auth
-│   │   ├── admin/
-│   │   │   ├── router.py                  ✅  +flussonic router
-│   │   │   ├── sessions.py                ✅
-│   │   │   ├── subscriptions.py           ✅
-│   │   │   ├── channels.py                ✅  +GET /{id}/stream-status (Flussonic live status)
-│   │   │   └── flussonic.py               ✅  NUEVO Fase 3d: /health, /streams, /streams/{name}
-│   │   ├── subscriber/                    placeholder
-│   │   └── client/                        ✅  /api/client/ — Modern Client API
-│   │       ├── auth.py                    login, refresh, logout
-│   │       ├── profile.py                 profile, devices, heartbeat
-│   │       ├── catalog.py                 canales DB + mock EPG
-│   │       └── playback.py                ✅  ACTUALIZADO Fase 3d: playback_url desde Flussonic
+│   │   ├── admin/                         ✅  +flussonic router, channels, sessions, subscriptions
+│   │   └── client/                        ✅  /api/client/ — Modern Client API (auth, profile, catalog, playback)
 │   └── middleware/
 │       └── rate_limit.py                  ✅
 ├── migrations/
@@ -86,13 +49,16 @@ nexora_api/
 │       └── 003_channels.py               ✅  tabla channels (21 filas)
 ├── scripts/
 │   ├── create_admin.py                    ✅
-│   ├── dev_server.py                      ✅
+│   ├── dev_server.py                      ✅  SelectorEventLoop Windows + Python 3.14
 │   ├── seed_channels.py                   ✅
-│   ├── map_flussonic_channels.py          ✅  NUEVO Fase 3d: mapeo DB -> Flussonic stream names
+│   ├── map_flussonic_channels.py          ✅  mapeo DB -> Flussonic stream names
 │   └── reset_test_password.py             ✅  utilidad dev
-├── web_player/                            ✅  Vite + React + hls.js
-│   ├── .env                               VITE_* vars (sin credenciales Flussonic)
-│   ├── vite.config.ts                     ✅  proxy /api/* -> localhost:8000
+├── web_player/                            ✅  Vite + React + hls.js — DOCKERIZADO (Fase 3e)
+│   ├── Dockerfile                         ✅  NUEVO: multi-stage Node build → nginx:1.27-alpine
+│   ├── nginx.conf                         ✅  NUEVO: proxy /api/ → api:8000, SPA fallback
+│   ├── .dockerignore                      ✅  NUEVO: excluye node_modules, dist, .env
+│   ├── .env                               VITE_NEXORA_API_BASE_URL= (vacío → usa window.location.origin)
+│   ├── vite.config.ts                     ✅  proxy /api/* -> localhost:8000 (dev local)
 │   └── src/
 │       └── player/
 │           └── playbackUrl.ts             ✅  usa playback_url de /authorize (Flussonic URL)
@@ -100,15 +66,15 @@ nexora_api/
 │   └── server.py                          ✅  14 herramientas
 ├── .env                                   ✅  FLUSSONIC_* vars (solo backend, en .gitignore)
 ├── requirements.txt                       ✅  +httpx
-├── Dockerfile                             ✅
-└── docker-compose.yml                     ✅
+├── Dockerfile                             ✅  FastAPI container
+└── docker-compose.yml                     ✅  ACTUALIZADO: +web_player service, fix REDIS/POSTGRES hosts
 ```
 
 ---
 
 ## ENDPOINTS DISPONIBLES
 
-### /api/client/ — Modern Client API (Fase 3c + 3d)
+### /api/client/ — Modern Client API
 
 | Método | Ruta | Auth | Descripción |
 |--------|------|------|-------------|
@@ -124,88 +90,90 @@ nexora_api/
 | POST | /api/client/playback/authorize | client_access | Token + URL HLS Flussonic |
 | GET | /api/client/playback/{channel_id} | client_access | Reemite playback token |
 
-**PlaybackResponse incluye:** `token` (60s JWT), `expires_in`, `channel_id`, `subscriber_id`, `playback_url` (HLS Flussonic directo)
+### /api/admin/channels, /api/admin/flussonic, /api/admin/subscribers
 
-### /api/admin/channels — Canal catalog (read-only)
-
-| Método | Ruta | Auth | Descripción |
-|--------|------|------|-------------|
-| GET | /api/admin/channels | admin/reseller | Lista todos los canales |
-| GET | /api/admin/channels/{id} | admin/reseller | Detalle (incluye stream_key) |
-| GET | /api/admin/channels/{id}/stream-status | admin/reseller | Estado live en Flussonic |
-
-### /api/admin/flussonic — Inspección Flussonic (Fase 3d)
-
-| Método | Ruta | Auth | Descripción |
-|--------|------|------|-------------|
-| GET | /api/admin/flussonic/health | admin/reseller | Conectividad Flussonic (host:port only) |
-| GET | /api/admin/flussonic/streams | admin/reseller | Lista streams Flussonic (sin credenciales) |
-| GET | /api/admin/flussonic/streams/{name} | admin/reseller | Estado de stream específico |
-
-### /api/admin/subscribers/{sub_id}/subscriptions
-
-| Método | Ruta | Auth | Descripción |
-|--------|------|------|-------------|
-| POST | /api/admin/subscribers/{sub_id}/subscriptions | admin/reseller | Crear suscripción |
-| GET | /api/admin/subscribers/{sub_id}/subscriptions | admin/reseller | Historial |
-| POST | .../subscriptions/{id}/renew | admin/reseller | Renovar |
-| POST | .../subscriptions/{id}/cancel | admin/reseller | Cancelar |
-
-### /api/v1/, /api/admin/, /api/stb/
-
-Ver documentación anterior — sin cambios en Fase 3d.
+Ver documentación anterior — sin cambios desde Fase 3d.
 
 ---
 
-## ESTADO DEL ENTORNO LOCAL
+## ESTADO DEL ENTORNO DOCKER
 
-| Componente | Estado | Detalle |
-|------------|--------|---------|
-| Docker postgres:16 | healthy | puerto 5433 |
-| Docker redis:7 | healthy | puerto 6380 |
-| FastAPI | running | puerto 8000, 96 rutas |
-| Alembic | head (003) | 3 migraciones aplicadas |
-| Admin user | creado | `admin / Admin1234!` |
-| Flussonic | configured | 181.78.246.211:8002, 77 streams (actualmente DOWN) |
-| Web Player | ready | Vite localhost:5173, proxy /api/* -> 8000 |
+| Contenedor | Imagen | Puerto | Estado |
+|------------|--------|--------|--------|
+| nexora_postgres | postgres:16-alpine | 5433→5432 | ✅ healthy |
+| nexora_redis | redis:7-alpine | 6380→6379 | ✅ healthy |
+| nexora_api | build ./Dockerfile | 8000→8000 | ✅ running (uvicorn --reload) |
+| nexora_web_player | build ./web_player/Dockerfile | 5173→80 | ✅ running (nginx) |
+| nexora_web | nexora_portal-500-v1-web | 80→80 | ✅ running (portal PHP legacy) |
 
-**Test subscriber:** `testuser1 / NexoraTest123!` (UUID: `23486171-e6ec-4667-9008-4b207077617f`)
-**Test device:** `test-device-001`
-**Test subscription:** activa hasta 2026-06-17
+**Arranque completo:**
+```bash
+docker compose up -d
+# Todos los servicios se levantan automáticamente con restart: unless-stopped
+```
+
+**Acceso multi-dispositivo validado (2026-05-18):**
+
+| Dispositivo | URL | Estado |
+|-------------|-----|--------|
+| Windows (local) | `http://127.0.0.1:5173` | ✅ |
+| Mac (LAN) | `http://192.168.100.221` | ✅ |
+
+> Puerto 5173 expuesto en `0.0.0.0` — accesible desde toda la LAN.
+> Requiere regla de Firewall Windows: TCP inbound 5173 Allow.
+> Firewall rule: `New-NetFirewallRule -DisplayName "Nexora Web Player 5173" -Direction Inbound -Protocol TCP -LocalPort 5173 -Action Allow -Profile Any` (ejecutar como Admin).
+
+### Variables de entorno críticas (docker-compose.yml override)
+
+El servicio `api` usa `env_file: .env` pero sobreescribe las variables de red para Docker:
+```yaml
+environment:
+  - POSTGRES_HOST=postgres   # nombre del servicio Docker, no localhost
+  - POSTGRES_PORT=5432       # puerto interno del container, no 5433
+  - REDIS_HOST=redis         # nombre del servicio Docker, no localhost
+  - REDIS_PORT=6379          # puerto interno del container, no 6380
+```
+> El `.env` usa `localhost:5433` y `localhost:6380` para desarrollo local (host machine).
+> Docker sobreescribe estos valores para la red interna.
 
 ---
 
-## FLUSSONIC INTEGRATION — Estado Validado (Fase 3d)
+## CREDENCIALES Y ACCESOS
 
-### Flujo de playback end-to-end (VALIDADO 2026-05-18)
+| Recurso | Valor |
+|---------|-------|
+| Web Player | `http://127.0.0.1:5173` |
+| API Docs | `http://127.0.0.1:8000/docs` |
+| API Health | `http://127.0.0.1:8000/health` |
+| Admin user | `admin / Admin1234!` |
+| Test subscriber | `testuser1 / NexoraTest123!` |
+| Test subscription | activa hasta 2026-06-17 (UUID: `23486171-e6ec-4667-9008-4b207077617f`) |
+| Flussonic EC | `181.78.246.211:8002` (READ-ONLY, credenciales en .env) |
+| Flussonic CO | `38.210.187.13:8002` (READ-ONLY, credenciales en .env) |
+
+---
+
+## LOGIN END-TO-END — VALIDADO EN BROWSER (2026-05-18)
 
 ```
-1. POST /api/client/auth/login
-   -> { access_token, refresh_token, subscriber_id }
+URL: http://127.0.0.1:5173
+Usuario: testuser1
+Password: NexoraTest123!
 
-2. GET /api/client/catalog/channels
-   -> 21 canales (channel_key, name, category — SIN stream_key)
-
-3. POST /api/client/playback/authorize { channel_id: "canal-1", device_id: "..." }
-   -> {
-        token: "<60s JWT>",
-        expires_in: 60,
-        channel_id: "canal-1",           <- channel_key, nunca stream_key
-        subscriber_id: "...",
-        playback_url: "http://181.78.246.211:8002/ECUADOR_TV/index.m3u8"
-      }
-
-4. POST /api/client/profile/devices/heartbeat
-   -> { subscription_active: true, active_connections: 1 }
+Flujo validado:
+1. Browser → nginx (5173) → POST /api/client/auth/login → nexora_api (8000)
+2. API autentica suscriptor, registra device, emite tokens JWT
+3. GET /api/client/catalog/channels → 21 canales cargados
+4. Home screen muestra perfil "Test User 29 días" + catálogo
 ```
 
-### Seguridad verificada
+**Bug resuelto:** `os_version` en `ClientLoginRequest` tenía `max_length=32`.
+`navigator.userAgent` supera ese límite → validación Pydantic fallaba con "String should have at most 32 characters".
+Fix: `max_length=512` en `app/schemas/client.py` (ClientLoginRequest + ClientDeviceRegister).
 
-- Credenciales Flussonic (`SoporteEC`, `S0p0rt3.R3D`) NUNCA aparecen en ninguna respuesta
-- `FlussonicClient` tiene `_WriteBlocker` — métodos write lanzan `RuntimeError`
-- `stream_key` nunca se expone al cliente (solo `channel_key`/`channel_id`)
-- HLS URLs no llevan usuario/password embebido: `http://HOST:PORT/{stream}/index.m3u8`
-- Credenciales solo en `.env` (backend) — en `.gitignore`
+---
+
+## FLUSSONIC INTEGRATION — Estado (Fase 3d)
 
 ### Mapeo de canales (21 canales)
 
@@ -263,7 +231,8 @@ Redis keys:
 - Flussonic es READ ONLY desde Nexora — nunca se crean/modifican/eliminan streams
 - Credenciales Flussonic solo en backend `.env`
 - El cliente recibe solo: `playback_url`, `token`, `expires_in`
-- Stalker/MAG/Xtream/PHP eliminados del flujo nuevo
+- Todo flujo nuevo pasa por Client API (`/api/client/*`)
+- Docker: servicios backend usan nombres de contenedor (redis, postgres), NO localhost
 
 ---
 
@@ -274,5 +243,6 @@ Redis keys:
 | Streams Flussonic actualmente DOWN | Externo — depende de fuentes IPTV |
 | `Noticiero_24/7` stream contiene `/` en nombre | Puede causar problemas URL — revisar |
 | EPG real no implementado | Mock temporal en catalog.py |
-| hls.js en navegador no testado end-to-end | Pendiente — ver TODO_NEXT.md |
+| hls.js reproducción end-to-end en browser | ✅ Validado — Noticiero 24/7 reproduciendo |
 | Sin signed URLs / backend-auth formal para Flussonic | Pendiente Fase 4 |
+| SECRET_KEY en .env es placeholder | Cambiar por valor de 64 chars aleatorios en producción |

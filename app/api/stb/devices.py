@@ -1,5 +1,5 @@
 """
-STB — endpoints para dispositivos MAG/Android TV.
+STB — endpoints para dispositivos (Android TV, web, móvil).
 POST /api/stb/heartbeat — heartbeat desde dispositivo
 POST /api/stb/register  — registro de dispositivo (STB-facing, sin auth admin)
 GET  /api/stb/connections/{sub_id} — conexiones activas del suscriptor
