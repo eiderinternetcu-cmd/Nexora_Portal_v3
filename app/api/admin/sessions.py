@@ -1,7 +1,8 @@
 """
 Admin — gestión de sesiones IPTV de suscriptores.
 
-GET    /api/admin/sessions/subscriber/{sub_id}  — listar sesiones activas
+GET    /api/admin/sessions/live                 — sesiones IPTV activas en tiempo real
+GET    /api/admin/sessions/subscriber/{sub_id}  — sesiones de un suscriptor
 DELETE /api/admin/sessions/subscriber/{sub_id}  — revocar todas
 DELETE /api/admin/sessions/{jti}                — revocar sesión por JTI
 
@@ -12,7 +13,11 @@ Al revocar:
   - Cierra la conexión IPTV en el ZSET de Redis
 """
 import uuid
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel, ConfigDict
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 import redis.asyncio as aioredis
 
@@ -24,8 +29,55 @@ from app.schemas.session import SessionOut
 from app.schemas.common import ApiResponse, MessageResponse
 from app.core.dependencies import require_admin_or_reseller
 from app.models.user import User
+from app.models.session import Session
+from app.models.subscriber import Subscriber
 
 router = APIRouter(prefix="/sessions", tags=["Admin — Sessions"])
+
+
+class LiveSessionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    session_id: str
+    subscriber_id: str
+    subscriber_username: str
+    device_id: str | None
+    ip_address: str | None
+    created_at: datetime
+    expires_at: datetime
+    last_heartbeat_at: datetime | None
+
+
+@router.get("/live", response_model=list[LiveSessionOut])
+async def list_live_sessions(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_admin_or_reseller),
+):
+    """All active IPTV sessions in real time (not revoked, not expired), newest first."""
+    now = datetime.now(timezone.utc)
+    result = await db.execute(
+        select(Session, Subscriber.username)
+        .join(Subscriber, Session.subscriber_id == Subscriber.id)
+        .where(
+            Session.revoked_at.is_(None),
+            Session.expires_at > now,
+        )
+        .order_by(Session.created_at.desc())
+        .limit(200)
+    )
+    return [
+        LiveSessionOut(
+            session_id=str(row.Session.id),
+            subscriber_id=str(row.Session.subscriber_id),
+            subscriber_username=row.username,
+            device_id=str(row.Session.device_id) if row.Session.device_id else None,
+            ip_address=row.Session.ip_address,
+            created_at=row.Session.created_at,
+            expires_at=row.Session.expires_at,
+            last_heartbeat_at=row.Session.last_heartbeat_at,
+        )
+        for row in result.all()
+    ]
 
 
 @router.get("/subscriber/{sub_id}", response_model=ApiResponse[list[SessionOut]])

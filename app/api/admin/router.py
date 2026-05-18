@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 from app.api.v1 import auth, users, subscribers, devices, plans
-from app.api.admin import sessions, subscriptions, channels, flussonic
+from app.api.admin import sessions, subscriptions, channels, flussonic, metrics
 
 router = APIRouter(prefix="/api/admin")
 
@@ -9,7 +9,8 @@ router.include_router(users.router)
 router.include_router(subscribers.router)
 router.include_router(devices.router)
 router.include_router(plans.router)
-router.include_router(sessions.router)
+router.include_router(metrics.router)   # /metrics + /nodes/health — before sessions
+router.include_router(sessions.router)  # /sessions/* — /{jti} after /live
 router.include_router(subscriptions.router)
 router.include_router(channels.router)
 router.include_router(flussonic.router)

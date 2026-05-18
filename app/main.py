@@ -1,10 +1,16 @@
+import asyncio
+import contextlib
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import update
 
 from app.config import get_settings
-from app.database import engine
+from app.database import engine, AsyncSessionLocal
+from app.models.session import Session
 from app.redis_client import get_redis, close_redis
 from app.api.v1.router import router as v1_router
 from app.api.admin.router import router as admin_router
@@ -16,15 +22,49 @@ from app.core.exceptions import NexoraException
 
 settings = get_settings()
 
+_CLEANUP_INTERVAL_SECONDS = 900  # 15 minutes
+
+
+async def _cleanup_expired_sessions() -> None:
+    """Background task: mark expired IPTV sessions as revoked for DB hygiene.
+
+    Sessions expire naturally (expires_at < NOW) and are already excluded from all
+    active-session queries. This cleanup marks them as revoked so they don't appear
+    as phantom records in admin views that don't filter by expires_at.
+    Runs every 15 minutes; first run is delayed to avoid startup load.
+    """
+    await asyncio.sleep(60)  # let the app warm up before first run
+    while True:
+        try:
+            now = datetime.now(timezone.utc)
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(
+                    update(Session)
+                    .where(Session.revoked_at.is_(None), Session.expires_at < now)
+                    .values(revoked_at=now)
+                    .returning(Session.id)
+                )
+                count = len(result.fetchall())
+                if count:
+                    print(f"[nexora-api] Cleaned up {count} expired session(s)")
+                await db.commit()
+        except Exception as exc:
+            print(f"[nexora-api] Session cleanup error: {exc}")
+        await asyncio.sleep(_CLEANUP_INTERVAL_SECONDS)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
     redis = await get_redis()
     await redis.ping()
-    print(f"[nexora-api] Redis connected")
+    print("[nexora-api] Redis connected")
+    cleanup_task = asyncio.create_task(_cleanup_expired_sessions())
     yield
     # Shutdown
+    cleanup_task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await cleanup_task
     await close_redis()
     await engine.dispose()
     print("[nexora-api] Shutdown complete")
