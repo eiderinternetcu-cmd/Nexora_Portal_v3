@@ -3,6 +3,18 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict
 
 
+class StreamStatusOut(BaseModel):
+    """
+    Flussonic stream status — safe to surface to admins.
+    Never includes Flussonic credentials or internal config.
+    """
+    stream_key: str
+    alive: bool
+    client_count: int
+    input_alive: bool
+    flussonic_configured: bool
+
+
 class ChannelPublic(BaseModel):
     """Client-facing — stream_key is NOT exposed."""
     model_config = ConfigDict(from_attributes=True)

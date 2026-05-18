@@ -41,10 +41,20 @@ app = FastAPI(
 
 # ── Middleware ────────────────────────────────────────────────────────────────
 
+# Explicit origins are always allowed regardless of debug mode.
+# In debug, also open wildcard (credentials must be False with wildcard per CORS spec).
+_WEB_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://172.27.99.151:5173",
+    "http://localhost:4173",
+    "http://127.0.0.1:4173",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"] if settings.debug else [],
-    allow_credentials=True,
+    allow_origins=(["*"] if settings.debug else _WEB_ORIGINS),
+    allow_credentials=not settings.debug,  # False with wildcard (debug), True with explicit (prod)
     allow_methods=["*"],
     allow_headers=["*"],
 )

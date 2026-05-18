@@ -1,172 +1,176 @@
 # TODO_NEXT.md — Próximos Pasos
-_Last updated: 2026-05-17_
+_Last updated: 2026-05-18_
 
 ---
 
 ## COMPLETADO — Fase 1 ✅
-
-- Modelos SQLAlchemy 2.x (User, Subscriber, Plan, Subscription, Device, AuditLog, Session)
-- Autenticación Argon2id + PyJWT con blacklist Redis
-- Rate limiting sliding window + lockout por IP/usuario
-- Migración 001: 6 tablas + triggers + índices
-- Docker Compose: postgres:16 + redis:7
-
 ## COMPLETADO — Fase 2 ✅
-
 ## COMPLETADO — Fase 3a: StreamAuthService ✅
 ## COMPLETADO — Fase 3b: IPTV DB Sessions ✅
 ## COMPLETADO — Fase 3b.2: Subscription CRUD ✅
-
-- `app/services/stream_auth_service.py` — authorize(), validate(), create_token(), revoke_token()
-- `app/schemas/playback.py` — PlayRequest, PlaybackTokenOut, ValidateRequest/Response, TokenRequest
-- `app/api/stb/playback.py` — POST /api/stb/auth/play, /validate, /token
-- `app/redis_client.py` — key_playback()
-- `app/config.py` — playback_token_expire_seconds (default 60s)
-- `app/middleware/rate_limit.py` — /auth/play=20/min, /auth/token=30/min
-- `.env` — PLAYBACK_TOKEN_EXPIRE_SECONDS=60
-
-- `Session` importada en `app/models/__init__.py`
-- Migración 002: tabla `sessions` + columnas fingerprint en `devices`
-- `ConnectionService` — Redis ZSET para concurrencia IPTV (score=expire_unix, member=device_id)
-- `SessionService` reescrito — Redis (admin) + PostgreSQL (subscriber IPTV)
-- `device_service.py` heartbeat extiende ZSET + retorna `active_connections`
-- Dominio `/api/admin/` con gestión de sesiones
-- Dominio `/api/stb/` — heartbeat sin auth, register, connections
-- Dominio `/api/subscriber/` — placeholder
-- `scripts/dev_server.py` — SelectorEventLoop para Windows + Python 3.14
-- Rate limits per-path: login=10, refresh=20, heartbeat=30, register=5
-- MCP server (`mcp_server/server.py`) — 14 herramientas, registrado en claude CLI
-
----
-
 ## COMPLETADO — Fase 3c: Modern Client API ✅ (2026-05-17)
-
-`/api/client/auth/login|refresh|logout` — JWT par (24h access / 90d refresh), lockout sub:*
-`/api/client/profile` — perfil + suscripción, dispositivos, heartbeat autenticado
-`/api/client/playback/authorize` — full auth via StreamAuthService (DB session + ZSET)
-`/api/client/playback/{channel_id}?device_id=` — reissue token ligero
-
 ## COMPLETADO — Fase 3c.1: Catálogo real de canales ✅ (2026-05-17)
+## COMPLETADO — Fase 3d: Flussonic Integration ✅ (2026-05-18)
 
-`app/models/channel.py` — Channel model (channel_key, stream_key, source_type, is_active…)
-`app/schemas/channel.py` — ChannelPublic (cliente, sin stream_key), ChannelAdminOut (admin completo)
-`app/services/channel_service.py` — list_active, get_by_key, get_active_by_key (READ ONLY)
-`migrations/versions/003_channels.py` — tabla channels con índices
-`scripts/seed_channels.py` — 21 canales seedeados (canal-1..canal-21, idempotente)
-`/api/client/catalog/channels` — DB real: 21 canales activos
-`/api/client/playback/authorize` — valida channel_key→stream_key antes de StreamAuthService
-`/api/admin/channels` — GET lista y detalle (read-only, incluye stream_key para admin)
-92 rutas totales
+### Qué entregó la Fase 3d
 
----
+- `app/integrations/flussonic_client.py` — cliente HTTP read-only con `_WriteBlocker`, autenticación Basic privada (`__auth`), singleton `get_flussonic_client()`
+- `app/config.py` — `flussonic_base_url`, `flussonic_readonly_user`, `flussonic_readonly_password`, `flussonic_readonly`
+- `.env` — credenciales Flussonic (solo backend, en .gitignore)
+- `app/api/client/playback.py` — `playback_url` construida desde Flussonic HLS URL (`http://HOST/{stream}/index.m3u8`), fallback a `source_url` en DB
+- `app/schemas/client.py` — `PlaybackResponse.playback_url` (renombrado desde `stream_key`)
+- `app/api/admin/channels.py` — `GET /{id}/stream-status`: estado live en Flussonic
+- `app/api/admin/flussonic.py` — `/health`, `/streams`, `/streams/{name}`: inspección read-only
+- `app/api/admin/router.py` — router Flussonic montado
+- `scripts/map_flussonic_channels.py` — mapeo de 21 canales DB a stream names Flussonic reales
+- `web_player/vite.config.ts` — proxy `/api/* -> http://localhost:8000`
+- `web_player/.env` — vars VITE_* (sin credenciales)
+- 96 rutas totales
 
-## FASE 3 — Bloques pendientes
+### Flujo validado (curl 2026-05-18)
 
-### 3d Actualizar stream_keys reales
-
-Cuando se conozcan los identificadores reales de Flussonic/Astra:
-
-```sql
--- Ejemplo de actualización directa en DB (nunca via API):
-UPDATE channels SET stream_key = 'real-stream-key', source_type = 'flussonic' WHERE channel_key = 'canal-1';
+```
+login -> tokens
+GET /api/client/catalog/channels -> 21 canales (stream_key NO expuesto)
+POST /api/client/playback/authorize canal-1
+  -> playback_url: http://181.78.246.211:8002/ECUADOR_TV/index.m3u8
+POST /api/client/profile/devices/heartbeat
+  -> subscription_active: true, active_connections: 1
 ```
 
-O desde el script seed actualizando el dict CHANNELS con los valores reales.
+---
 
-### 3e EPG real
+## FASE 4 — PRÓXIMOS BLOQUES
 
-Reemplazar `_MOCK_EPG` en `catalog.py` con:
-- Tabla `epg_entries` (migración 004), o
-- Integración externa (XMLTV, Gracenote, etc.)
+### 4.1 Reproducción hls.js en navegador (PRIORIDAD)
 
-### 3f Admin: Write para canales (cuando sea necesario)
+Verificar end-to-end en navegador con Vite dev server:
 
-Agregar POST/PATCH/DELETE en `/api/admin/channels` si se quiere gestión desde UI.
-Por ahora solo lectura — las actualizaciones de stream_key se hacen directo en DB.
+1. `npm run dev` en `web_player/`
+2. Login desde UI con `testuser1 / NexoraTest123!`
+3. Seleccionar canal → `POST /api/client/playback/authorize`
+4. hls.js recibe `playback_url` y carga `ECUADOR_TV/index.m3u8`
+5. Confirmar video reproduciéndose (cuando Flussonic tenga fuentes activas)
+
+Pendiente en código:
+- Manejo de error cuando Flussonic retorna 404/stream DOWN
+- Mensaje al usuario "señal no disponible" vs error técnico
+- Retry automático de HLS con backoff
+
+### 4.2 Manejo de errores HLS
+
+```typescript
+// HlsController: manejar MEDIA_ERROR, NETWORK_ERROR
+// - Stream DOWN: mostrar "Canal no disponible"
+// - 401 en HLS URL: solicitar nuevo token (re-authorize)
+// - Timeout: retry con backoff exponencial
+```
+
+### 4.3 Signed URLs / Backend-auth formal para Flussonic
+
+Flussonic soporta backend-auth via callback HTTP:
+- Configurar en Flussonic: `auth_backend = http://nexora-api:8000/api/stb/auth/validate`
+- El endpoint `POST /api/stb/auth/validate` ya existe y valida el playback JWT
+- Eliminar URLs sin firma — solo URLs con token en query param o header
+
+Refs: [Flussonic backend auth docs]
+
+### 4.4 Multi-Flussonic node registry
+
+```python
+# config.py: FLUSSONIC_NODES = [
+#   {"url": "http://181.78.246.211:8002", "region": "quito", "weight": 1},
+#   {"url": "http://...", "region": "guayaquil", "weight": 1},
+# ]
+# FlussonicRouter: selecciona nodo por región del subscriber o round-robin
+```
+
+### 4.5 Geo-routing / fallback por país
+
+- Detectar IP del cliente en `/authorize`
+- Seleccionar nodo Flussonic más cercano (por región configurada)
+- Fallback automático si nodo primario DOWN
+
+### 4.6 Android TV / Mobile
+
+- Confirmar que `/api/client/*` funciona desde APK Android TV (mismas rutas)
+- Agregar `device_type: "android_tv"` en login para analytics
+- Push notifications via FCM para expiración de suscripción
+- Deep links para canales (`nexora://canal/canal-1`)
+
+### 4.7 Observabilidad
+
+- Structured logging (structlog o loguru) con `correlation_id` por request
+- Métricas Prometheus: latencia `/authorize`, tasa de error HLS, conexiones activas
+- Alertas: si `active_connections > max_connections * 0.9` por suscriptor
+- Dashboard Grafana: canales más vistos, errores por región
+- Sentry para errores no capturados en producción
+
+### 4.8 EPG real
+
+Reemplazar `_MOCK_EPG` en `catalog.py`:
+- Opción A: tabla `epg_entries` (migración 004) + ingest XMLTV periódico
+- Opción B: proxy a proveedor externo (Gracenote, EPGDB, etc.)
+- Cache Redis con TTL 1h por canal
+
+### 4.9 Admin: Write para canales
+
+`POST/PATCH/DELETE /api/admin/channels` cuando se necesite gestión desde UI.
+Por ahora: actualizaciones de `stream_key` via `scripts/map_flussonic_channels.py`.
 
 ---
 
 ## COMANDOS PARA EL SIGUIENTE AGENTE
 
 ```bash
-# Levantar entorno (si no corre)
+# Verificar entorno
 docker-compose up -d
+curl http://localhost:8000/health
 
-# Levantar servidor local (Windows)
+# Levantar servidor (Windows)
 python scripts/dev_server.py
 
-# Health check
-curl http://localhost:8000/health
+# Levantar web player
+cd web_player && npm run dev
+
+# Login test subscriber
+curl -X POST http://localhost:8000/api/client/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"testuser1","password":"NexoraTest123!","device_id":"test-device-001"}'
+
+# Playback authorize (retorna playback_url Flussonic)
+curl -X POST http://localhost:8000/api/client/playback/authorize \
+  -H "Authorization: Bearer <access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"channel_id":"canal-1","device_id":"test-device-001"}'
+# playback_url -> http://181.78.246.211:8002/ECUADOR_TV/index.m3u8
+
+# Admin: inspeccionar Flussonic
+curl http://localhost:8000/api/admin/flussonic/health \
+  -H "Authorization: Bearer <admin_token>"
+
+curl http://localhost:8000/api/admin/flussonic/streams \
+  -H "Authorization: Bearer <admin_token>"
+
+# Mapear canales adicionales (editar CHANNEL_MAP primero)
+python scripts/map_flussonic_channels.py
 
 # Admin login
 curl -X POST http://localhost:8000/api/v1/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username":"admin","password":"Admin1234!"}'
-
-# --- Client API (Fase 3c + 3c.1) ---
-
-# Subscriber login (auto-registra el dispositivo)
-curl -X POST http://localhost:8000/api/client/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"username":"<subscriber_username>","password":"<pass>","device_id":"my-android-tv-001","device_type":"android_tv","model":"Shield","brand":"Nvidia"}'
-# Respuesta: { access_token, refresh_token, expires_in, subscriber_id }
-
-# Perfil del suscriptor
-curl http://localhost:8000/api/client/profile \
-  -H "Authorization: Bearer <access_token>"
-
-# Lista de canales mock
-curl http://localhost:8000/api/client/catalog/channels \
-  -H "Authorization: Bearer <access_token>"
-
-# Autorizar reproducción (crea sesión IPTV en DB)
-curl -X POST http://localhost:8000/api/client/playback/authorize \
-  -H "Authorization: Bearer <access_token>" \
-  -H "Content-Type: application/json" \
-  -d '{"device_id":"my-android-tv-001","channel_id":"canal-1"}'
-# Respuesta: { token (60s), expires_in, channel_id, subscriber_id }
-
-# Reemitir token para dispositivo ya conectado
-curl "http://localhost:8000/api/client/playback/canal-1?device_id=my-android-tv-001" \
-  -H "Authorization: Bearer <access_token>"
-
-# Heartbeat autenticado
-curl -X POST http://localhost:8000/api/client/profile/devices/heartbeat \
-  -H "Authorization: Bearer <access_token>" \
-  -H "Content-Type: application/json" \
-  -d '{"device_id":"my-android-tv-001"}'
-
-# Refresh token
-curl -X POST http://localhost:8000/api/client/auth/refresh \
-  -H "Content-Type: application/json" \
-  -d '{"refresh_token":"<refresh_token>"}'
-
-# Logout
-curl -X POST http://localhost:8000/api/client/auth/logout \
-  -H "Authorization: Bearer <access_token>" \
-  -H "Content-Type: application/json" \
-  -d '{"refresh_token":"<refresh_token>"}'
-
-# Admin: ver catálogo completo (con stream_key)
-curl http://localhost:8000/api/admin/channels \
-  -H "Authorization: Bearer <admin_access_token>"
-
-# Migrar + seed (si DB es nueva)
-# .venv\Scripts\python.exe -m alembic upgrade head
-# .venv\Scripts\python.exe scripts/seed_channels.py
 ```
 
 ---
 
-## NOTAS IMPORTANTES
+## REGLAS DEL PROYECTO (no cambiar sin discusión)
 
 - No usar PHP para módulos nuevos
-- No empezar UI todavía (la UI está en `e:/WEBSITE/nexora_app` — proyecto separado)
 - No usar MySQL en módulos nuevos
-- No usar python-jose (requiere Rust), usar PyJWT[crypto]
-- No usar asyncpg (compilación Rust), usar psycopg[binary]
-- Primero clonar entorno, nunca migrar directo en producción
-- El portal legacy PHP en `STB_PORTAL_URL` solo es referencia temporal
-- `sessions` tabla existe con flujo completo (Fase 3b completada)
-- No usar MAG/Stalker — no hay STBs MAG físicos en el proyecto
-- No usar protocolo Stalker (Fase 3c reemplaza 3d original con Client API moderna)
+- No usar python-jose, usar PyJWT[crypto]
+- No usar asyncpg, usar psycopg[binary]
+- No usar MAG/Stalker/Xtream en flujo nuevo — Client API es el camino
+- No exponer credenciales Flussonic en ninguna respuesta
+- Flussonic es READ ONLY desde Nexora
+- Nexora no hace proxy de video — cliente reproduce directo desde Flussonic
+- No empezar UI en este repo — está en `e:/WEBSITE/nexora_app`

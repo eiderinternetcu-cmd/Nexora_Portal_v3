@@ -45,6 +45,13 @@ class Settings(BaseSettings):
     # STB
     stb_portal_url: str = "http://172.27.99.151/nexora_portal"
 
+    # Flussonic Media Server — read-only integration
+    # Credentials live ONLY here. Never returned to clients.
+    flussonic_base_url: str = ""
+    flussonic_readonly_user: str = ""
+    flussonic_readonly_password: str = ""
+    flussonic_readonly: bool = True  # guard: disables write methods
+
     @property
     def database_url(self) -> str:
         """Async URL for SQLAlchemy create_async_engine (psycopg3)."""

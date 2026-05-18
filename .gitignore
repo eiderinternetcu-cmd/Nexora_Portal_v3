@@ -1,0 +1,3 @@
+web_player/node_modules/
+web_player/dist/
+web_player/.env.local

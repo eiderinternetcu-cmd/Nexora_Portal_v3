@@ -70,7 +70,7 @@ class PlaybackResponse(BaseModel):
     expires_in: int
     channel_id: str | None = None
     subscriber_id: str
-    stream_key: str | None = None  # temp: web player needs this to build HLS URL (Phase 4 will return signed URL instead)
+    playback_url: str | None = None  # Direct HLS URL when source_url is configured on the channel
 
 
 class ClientHeartbeatRequest(BaseModel):
