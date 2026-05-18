@@ -1,0 +1,66 @@
+version: "3.9"
+
+services:
+  api:
+    build: .
+    container_name: nexora_api
+    ports:
+      - "8000:8000"
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./app:/app/app
+      - ./migrations:/app/migrations
+      - ./alembic.ini:/app/alembic.ini
+    networks:
+      - nexora_net
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: nexora_postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-nexora}
+      POSTGRES_USER: ${POSTGRES_USER:-nexora}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nexora_secret}
+    ports:
+      - "5433:5432"
+    volumes:
+      - nexora_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nexora}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - nexora_net
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: nexora_redis
+    command: redis-server --save 60 1 --loglevel warning
+    ports:
+      - "6380:6379"
+    volumes:
+      - nexora_redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - nexora_net
+    restart: unless-stopped
+
+volumes:
+  nexora_pgdata:
+  nexora_redisdata:
+
+networks:
+  nexora_net:
+    driver: bridge

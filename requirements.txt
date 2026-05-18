@@ -1,0 +1,19 @@
+fastapi>=0.115.5
+uvicorn[standard]>=0.32.0
+sqlalchemy[asyncio]>=2.0.36
+psycopg[binary]>=3.2.10
+alembic>=1.14.0
+pydantic>=2.10.0
+pydantic-settings>=2.6.0
+PyJWT[crypto]>=2.10.0
+passlib[argon2]>=1.7.4
+argon2-cffi>=23.1.0
+redis[asyncio]>=5.2.0
+python-multipart>=0.0.17
+httpx>=0.28.0
+email-validator>=2.2.0
+python-dateutil>=2.9.0
+
+# MCP server (dev tool — local only)
+mcp[cli]>=1.0.0
+pyyaml>=6.0

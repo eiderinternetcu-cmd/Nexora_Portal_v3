@@ -1,0 +1,35 @@
+project:
+  root: "E:/WEBSITE/nexora_api"
+  name: "nexora-api"
+
+api:
+  base_url: "http://localhost:8000"
+  health_endpoint: "/health"
+  timeout_seconds: 5
+
+# Local dev ports (as mapped in docker-compose.yml)
+postgres:
+  host: "localhost"
+  port: 5433
+  database: "nexora"
+  user: "nexora"
+  # password: loaded from .env (POSTGRES_PASSWORD) — never hardcoded here
+
+redis:
+  host: "localhost"
+  port: 6380
+  db: 0
+  # password: loaded from .env (REDIS_PASSWORD)
+
+docker:
+  compose_file: "docker-compose.yml"
+  allowed_services:
+    - api
+    - postgres
+    - redis
+
+policy:
+  allow_alembic_upgrade: true   # true = permitir upgrade head en dev local
+  allow_pytest: true
+  max_log_lines: 200
+  modified_files_max_hours: 168  # 7 días
