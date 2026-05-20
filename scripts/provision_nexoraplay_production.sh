@@ -32,15 +32,20 @@ if [ -z "${LETSENCRYPT_EMAIL:-}" ]; then
   exit 1
 fi
 
-echo "[1/7] Installing certbot and ufw..."
+echo "[1/8] Installing certbot and ufw..."
 apt-get update
 apt-get install -y certbot ufw ca-certificates curl
 
-echo "[2/7] Preparing ACME webroot..."
+echo "[2/8] Preparing ACME webroot..."
 mkdir -p /var/www/certbot
 
+echo "[3/8] Ensuring SSH/HTTP/HTTPS are allowed if UFW is active..."
+ufw allow 22/tcp >/dev/null || true
+ufw allow 80/tcp >/dev/null || true
+ufw allow 443/tcp >/dev/null || true
+
 if [ ! -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" ]; then
-  echo "[3/7] Requesting first Let's Encrypt certificate..."
+  echo "[4/8] Requesting first Let's Encrypt certificate..."
   systemctl stop nginx 2>/dev/null || true
   docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" stop nginx 2>/dev/null || true
   certbot certonly \
@@ -51,10 +56,10 @@ if [ ! -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" ]; then
     -d "$DOMAIN" \
     -d "$WWW_DOMAIN"
 else
-  echo "[3/7] Certificate already exists, skipping first issuance."
+  echo "[4/8] Certificate already exists, skipping first issuance."
 fi
 
-echo "[4/7] Installing renewal hooks for standalone renewal..."
+echo "[5/8] Installing renewal hooks for standalone renewal..."
 install -d /etc/letsencrypt/renewal-hooks/pre /etc/letsencrypt/renewal-hooks/post
 
 cat >/etc/letsencrypt/renewal-hooks/pre/stop-nexora-nginx.sh <<HOOK
@@ -71,14 +76,14 @@ chmod +x /etc/letsencrypt/renewal-hooks/pre/stop-nexora-nginx.sh
 chmod +x /etc/letsencrypt/renewal-hooks/post/start-nexora-nginx.sh
 systemctl enable --now certbot.timer >/dev/null 2>&1 || true
 
-echo "[5/7] Building and starting production containers..."
+echo "[6/8] Building and starting production containers..."
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --build
 
-echo "[6/7] Running database migrations and channel sync..."
+echo "[7/8] Running database migrations and channel sync..."
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T api alembic upgrade head
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T api python scripts/import_m3u_channels.py
 
-echo "[7/7] Running quick checks..."
+echo "[8/8] Running quick checks..."
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" ps
 curl -fsSI "https://$DOMAIN" | head -20
 curl -fsS "https://$DOMAIN/health"

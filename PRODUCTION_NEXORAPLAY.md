@@ -39,6 +39,19 @@ sudo bash scripts/provision_nexoraplay_production.sh
 The first certificate uses Certbot standalone, so ports `80` and `443` must be free during first issuance.
 The script also runs Alembic migrations and syncs the 24-channel catalog with `scripts/import_m3u_channels.py`.
 
+If the site does not answer on `80` or `443`, run:
+
+```bash
+sudo bash scripts/diagnose_nexoraplay_production.sh
+```
+
+The common failure modes are:
+
+- DNS still has parking/default A records instead of only `45.184.225.4`.
+- UFW or the host provider blocks `80`/`443`.
+- The certificate was not issued, so the Nginx container exits at startup.
+- The production stack was not started with `--env-file .env.production`.
+
 ## Verify before firewall lockdown
 
 ```bash
