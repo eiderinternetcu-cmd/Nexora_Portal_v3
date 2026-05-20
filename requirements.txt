@@ -17,3 +17,4 @@ python-dateutil>=2.9.0
 # MCP server (dev tool — local only)
 mcp[cli]>=1.0.0
 pyyaml>=6.0
+paramiko>=3.5.0         # SSH remote audit (nexora-ssh MCP)
