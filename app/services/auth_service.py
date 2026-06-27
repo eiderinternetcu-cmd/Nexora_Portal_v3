@@ -92,7 +92,7 @@ class AuthService:
         except InvalidTokenError:
             raise unauthorized("Invalid refresh token")
 
-        if payload.type != "refresh":
+        if payload.type not in ("admin_refresh", "refresh"):
             raise unauthorized("Expected refresh token")
 
         session = await self.sessions.get_refresh(payload.jti)

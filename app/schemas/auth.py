@@ -22,6 +22,8 @@ class TokenPayload(BaseModel):
     sub: str           # user UUID
     jti: str           # unique token ID
     role: UserRole
-    type: str          # "access" | "refresh"
+    type: str          # "admin_access" | "admin_refresh" (legacy: "access" | "refresh")
     exp: int
     iat: int
+    aud: str | None = None   # "nexora-admin" (added in JWT hardening; legacy tokens lack it)
+    iss: str | None = None   # "nexora-api"

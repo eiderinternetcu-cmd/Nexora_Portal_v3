@@ -28,6 +28,7 @@ Redis keys usados:
   nexora:active_conns:{sub_id}      → ZSET de conexiones activas
 """
 import json
+import logging
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
@@ -38,6 +39,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
+from app.core.security import AUD_PLAYBACK, TYPE_PLAYBACK
+from app.services.entitlement_service import EntitlementService
+
+logger = logging.getLogger(__name__)
+
+# Playback token types accepted by the validator (legacy "playback" tolerated;
+# tokens are 60s-lived so there is no real legacy window).
+_PLAYBACK_TYPES = {TYPE_PLAYBACK, "playback"}
 from app.models.device import Device
 from app.models.plan import Plan
 from app.models.session import Session
@@ -89,11 +98,9 @@ class StreamAuthService:
         )
         device = result.scalar_one_or_none()
         if device is None:
-            raise NexoraException(404, "Device not registered")
+            raise NexoraException(403, "DEVICE_NOT_REGISTERED")
         if device.is_blocked:
-            raise NexoraException(
-                403, f"Device is blocked: {device.block_reason or 'no reason given'}"
-            )
+            raise NexoraException(403, "DEVICE_BLOCKED")
         return device
 
     async def _load_active_subscription(
@@ -116,6 +123,35 @@ class StreamAuthService:
             raise NexoraException(403, "No active subscription found")
         return row
 
+    # ── Entitlement gate (P0) ──────────────────────────────────────────────────
+
+    async def _check_entitlement(
+        self,
+        subscriber_id: uuid.UUID,
+        device_id_str: str,
+        channel_key: str | None,
+    ) -> None:
+        """Consult EntitlementService BEFORE creating session/token/URL.
+
+        - channel_key None  → skip (no catalog context, e.g. token reissue/STB).
+        - allow             → return.
+        - deny + enforce ON → raise 403 with reason_code (nothing created).
+        - deny + enforce OFF→ log warning, continue (compat / observation mode).
+        """
+        if channel_key is None:
+            return
+        result = await EntitlementService(self.db).can_watch_channel(
+            subscriber_id, device_id_str, channel_key
+        )
+        if result.allow:
+            return
+        if settings.entitlement_enforce:
+            raise NexoraException(403, result.reason_code.value)
+        logger.warning(
+            "entitlement deny (enforce=off): subscriber=%s channel=%s reason=%s",
+            subscriber_id, channel_key, result.code,
+        )
+
     # ── Token lifecycle ───────────────────────────────────────────────────────
 
     def _issue_jwt(
@@ -123,11 +159,15 @@ class StreamAuthService:
         subscriber_id: uuid.UUID,
         device_id: uuid.UUID,
         session_jti: str,
-        channel_id: str | None,
+        channel_key: str | None = None,
+        stream_key: str | None = None,
+        node: str | None = None,
     ) -> tuple[str, str, int]:
         """Returns (encoded_token, playback_jti, ttl_seconds).
 
-        Includes 'ses' claim linking the playback token to its IPTV session in DB.
+        Playback token (type=playback_token, aud=nexora-playback, iss=nexora-api).
+        Bound to subscriber(sub) + device(dev) + session(ses) + channel(chn) +
+        stream_key(sk) + node, so a token is only valid for its exact stream.
         """
         jti = str(uuid.uuid4())
         ttl = settings.playback_token_expire_seconds
@@ -136,8 +176,12 @@ class StreamAuthService:
             "sub": str(subscriber_id),
             "dev": str(device_id),
             "ses": session_jti,
-            "chn": channel_id,
-            "type": "playback",
+            "chn": channel_key,
+            "sk": stream_key,
+            "node": node,
+            "type": TYPE_PLAYBACK,
+            "aud": AUD_PLAYBACK,
+            "iss": settings.jwt_issuer,
             "jti": jti,
             "iat": int(now.timestamp()),
             "exp": int((now + timedelta(seconds=ttl)).timestamp()),
@@ -168,18 +212,23 @@ class StreamAuthService:
         await self.redis.expire(key_session_playbacks(session_jti), _IPTV_SESSION_TTL)
 
     async def _decode_jwt(self, token: str) -> dict:
-        """Decode and verify JWT. Raises NexoraException on failure."""
+        """Decode and verify JWT. Raises NexoraException on failure.
+
+        Audience is not auto-verified here (verify_aud=False); aud/iss are checked
+        explicitly by callers (validate_stream_request). Algorithm is fixed.
+        """
         try:
             payload = jwt.decode(
                 token,
                 settings.secret_key,
                 algorithms=[settings.jwt_algorithm],
+                options={"verify_aud": False},
             )
         except jwt.ExpiredSignatureError:
             raise NexoraException(401, "Playback token expired")
         except jwt.InvalidTokenError:
             raise NexoraException(401, "Invalid playback token")
-        if payload.get("type") != "playback":
+        if payload.get("type") not in _PLAYBACK_TYPES:
             raise NexoraException(401, "Invalid token type")
         return payload
 
@@ -230,16 +279,26 @@ class StreamAuthService:
         channel_id: str | None = None,
         ip: str | None = None,
         user_agent: str | None = None,
+        channel_key: str | None = None,
+        node: str | None = None,
     ) -> PlaybackToken:
         """
         Full authorization flow:
+          0. entitlement (can_watch_channel) — runs FIRST; if denied and
+             ENTITLEMENT_ENFORCE is on, raises 403 BEFORE any session/token/URL.
           1. subscriber active
           2. subscription active + not expired → plan.max_connections
           3. device not blocked + belongs to subscriber
           4. concurrent slot available (Redis ZSET)
           5. IPTV session created / replaced in PostgreSQL
           6. playback JWT issued with 'ses' claim linking to DB session
+
+        channel_key is the PUBLIC channel key (catalog). When provided, the
+        EntitlementService is consulted. channel_id is the internal stream_key
+        embedded in the token (unchanged).
         """
+        await self._check_entitlement(subscriber_id, device_id_str, channel_key)
+
         sub = await self._load_subscriber(subscriber_id)
         _, plan = await self._load_active_subscription(sub.id)
         device = await self._load_device(device_id_str)
@@ -267,7 +326,10 @@ class StreamAuthService:
             device_fingerprint=device.device_fingerprint,
         )
 
-        token, jti, ttl = self._issue_jwt(sub.id, device.id, session_jti, channel_id)
+        token, jti, ttl = self._issue_jwt(
+            sub.id, device.id, session_jti,
+            channel_key=channel_key, stream_key=channel_id, node=node,
+        )
         await self._store_jwt(jti, sub.id, device.id, session_jti, channel_id, ttl)
         return self._build_result(token, jti, session_jti, ttl, sub.id, device.id, channel_id)
 
@@ -309,6 +371,61 @@ class StreamAuthService:
             "expires_at": payload.get("exp"),
         }
 
+    async def validate_stream_request(
+        self,
+        token: str | None,
+        stream_key: str | None = None,
+        node: str | None = None,
+    ) -> dict:
+        """Validate a playback token for a concrete /stream/* request.
+
+        Designed for the Nginx auth_request → FastAPI gate (FASE 5).
+        Checks (fast → slow):
+          1. token present, signature + exp + type=playback_token  (_decode_jwt)
+          2. aud=nexora-playback, iss=nexora-api
+          3. Redis playback token not revoked
+          4. ZSET connection alive for this device
+          5. IPTV session not revoked/expired
+          6. stream_key / node bound to the token (no cross-stream reuse)
+        Returns a SAFE payload dict. Raises NexoraException(401/403) on failure.
+        """
+        if not token:
+            raise NexoraException(401, "Missing playback token")
+
+        payload = await self._decode_jwt(token)
+
+        if payload.get("aud") != AUD_PLAYBACK or payload.get("iss") != settings.jwt_issuer:
+            raise NexoraException(401, "Invalid playback token audience/issuer")
+
+        jti = payload.get("jti", "")
+        subscriber_id_str = payload.get("sub", "")
+        device_id_str = payload.get("dev", "")
+        ses = payload.get("ses")
+
+        if not await self.redis.exists(key_playback(jti)):
+            raise NexoraException(401, "Playback token not found or revoked")
+
+        if not await self._conn.is_connected(subscriber_id_str, device_id_str):
+            raise NexoraException(403, "No active IPTV connection for this device")
+
+        if ses and not await self._check_session_valid(ses):
+            raise NexoraException(403, "IPTV session has been revoked or expired")
+
+        if stream_key is not None and payload.get("sk") != stream_key:
+            raise NexoraException(403, "Playback token not valid for this stream")
+
+        if node is not None and payload.get("node") not in (None, node):
+            raise NexoraException(403, "Playback token not valid for this node")
+
+        return {
+            "subscriber_id": subscriber_id_str,
+            "device_id": device_id_str,
+            "channel_id": payload.get("chn"),
+            "stream_key": payload.get("sk"),
+            "node": payload.get("node"),
+            "expires_at": payload.get("exp"),
+        }
+
     async def create_token(
         self,
         subscriber_id: uuid.UUID,
@@ -343,7 +460,7 @@ class StreamAuthService:
             )
 
         token, jti, ttl = self._issue_jwt(
-            subscriber_id, device.id, session.access_token_jti, channel_id
+            subscriber_id, device.id, session.access_token_jti, stream_key=channel_id
         )
         await self._store_jwt(
             jti, subscriber_id, device.id, session.access_token_jti, channel_id, ttl

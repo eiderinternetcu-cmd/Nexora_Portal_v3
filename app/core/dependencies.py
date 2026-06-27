@@ -8,7 +8,17 @@ import redis.asyncio as aioredis
 
 from app.database import get_db
 from app.redis_client import get_redis, key_blacklist, key_client
-from app.core.security import decode_token, decode_client_token
+from app.core.security import (
+    decode_claims,
+    decode_client_token,
+    enforce_surface,
+    AUD_ADMIN,
+    AUD_CLIENT,
+    TYPE_ADMIN_ACCESS,
+    TYPE_CLIENT_ACCESS,
+    LEGACY_ADMIN_ACCESS,
+    LEGACY_CLIENT_ACCESS,
+)
 from app.core.exceptions import unauthorized, forbidden
 from app.models.user import User, UserRole
 from app.models.subscriber import Subscriber, SubscriberStatus
@@ -24,11 +34,11 @@ async def _get_token_payload(
     if not credentials:
         raise unauthorized("Missing Bearer token")
     try:
-        payload = decode_token(credentials.credentials)
+        claims = decode_claims(credentials.credentials)
+        enforce_surface(claims, TYPE_ADMIN_ACCESS, AUD_ADMIN, LEGACY_ADMIN_ACCESS)
     except InvalidTokenError:
         raise unauthorized("Invalid or expired token")
-    if payload.type != "access":
-        raise unauthorized("Expected access token")
+    payload = TokenPayload(**claims)
     if await redis.exists(key_blacklist(payload.jti)):
         raise unauthorized("Token has been revoked")
     return payload
@@ -72,10 +82,9 @@ async def get_client_token_payload(
         raise unauthorized("Missing Bearer token")
     try:
         payload = decode_client_token(credentials.credentials)
+        enforce_surface(payload, TYPE_CLIENT_ACCESS, AUD_CLIENT, LEGACY_CLIENT_ACCESS)
     except InvalidTokenError:
         raise unauthorized("Invalid or expired token")
-    if payload.get("type") != "client_access":
-        raise unauthorized("Expected client access token")
     jti = payload.get("jti")
     if not jti or not await redis.exists(key_client(jti)):
         raise unauthorized("Token has been revoked")

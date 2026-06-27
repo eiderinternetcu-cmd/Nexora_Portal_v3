@@ -6,6 +6,7 @@ from app.models.device import Device
 from app.models.audit import AuditLog
 from app.models.session import Session
 from app.models.channel import Channel
+from app.models.plan_channel import PlanChannel
 
 __all__ = [
     "User", "UserRole",
@@ -16,4 +17,5 @@ __all__ = [
     "AuditLog",
     "Session",
     "Channel",
+    "PlanChannel",
 ]

@@ -13,6 +13,7 @@ class Settings(BaseSettings):
 
     # JWT
     jwt_algorithm: str = "HS256"
+    jwt_issuer: str = "nexora-api"
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 30
 
@@ -33,6 +34,11 @@ class Settings(BaseSettings):
     max_login_attempts: int = 5
     login_lockout_minutes: int = 15
     rate_limit_per_minute: int = 60
+
+    # Feature flags — P0 rollout (default OFF: validate+warn, do not block)
+    entitlement_enforce: bool = False   # True → playback denies channels not in plan_channels
+    jwt_require_aud: bool = False        # True → strict iss/aud/type per surface; False → legacy-compatible
+    signed_url_enforce: bool = False     # True → playback_url carries ?token= and /stream/* requires it
 
     # IPTV concurrency
     heartbeat_ttl_seconds: int = 180        # auto-disconnect after 3 missed heartbeats
