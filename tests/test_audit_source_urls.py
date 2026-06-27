@@ -1,9 +1,22 @@
 """Unit tests for the read-only channel source_url auditor (classify())."""
-from scripts.audit_channel_source_urls import classify, sanitize_url
+from scripts.audit_channel_source_urls import classify, sanitize_url, DEFAULT_NODES
 
 ORIGINS = ["https://nexoraplay.net"]
 PREFIXES = ["/stream/"]
-NODES = ["ec-main", "co-main"]
+NODES = ["ec-main", "co-main", "ec-quito"]
+
+
+def test_ec_quito_is_an_allowed_default_node():
+    assert "ec-quito" in DEFAULT_NODES
+
+
+def test_ec_quito_same_origin_ok():
+    status, _ = classify(
+        {"source_url": "/stream/ec-quito/K1/index.m3u8", "hls_path": "index.m3u8",
+         "flussonic_node": "ec-quito"},
+        ORIGINS, PREFIXES, NODES,
+    )
+    assert status == "OK"
 
 
 def _c(**over):

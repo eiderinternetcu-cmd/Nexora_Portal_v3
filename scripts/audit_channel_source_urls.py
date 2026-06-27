@@ -47,7 +47,7 @@ if sys.platform == "win32":
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 DEFAULT_PREFIXES = "/stream/"
-DEFAULT_NODES = "ec-main,co-main"
+DEFAULT_NODES = "ec-main,co-main,ec-quito"
 
 
 # ── pure helpers (unit-testable, no DB) ──────────────────────────────────────
