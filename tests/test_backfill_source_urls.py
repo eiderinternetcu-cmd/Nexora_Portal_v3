@@ -44,6 +44,14 @@ def test_node_mode_nulls_source_url():
     assert p["proposed"]["source_url"] is None
 
 
+def test_known_ip_quito_maps_to_ec_quito():
+    p = bf.plan_channel(_ch(source_url="http://45.70.202.171:8002/CanalQuito/index.m3u8",
+                            stream_key="", flussonic_node=""))
+    assert p["status"] == "FIX"
+    assert p["proposed"]["flussonic_node"] == "ec-quito"
+    assert p["proposed"]["source_url"] == "/stream/ec-quito/CanalQuito/index.m3u8"
+
+
 def test_unknown_host_is_risk_and_untouched():
     p = bf.plan_channel(_ch(source_url="https://cdn-externo.example/x/index.m3u8"))
     assert p["status"] == "RISK"

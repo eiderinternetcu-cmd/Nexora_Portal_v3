@@ -44,9 +44,12 @@ if sys.platform == "win32":
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Known Flussonic/Astra origins → node id. Only these are auto-fixable.
+# NOTE: a node id here must also exist in config (base_url) + Nginx (/stream/<node>/)
+# before the rewritten same-origin URL can actually serve and be gated.
 IP_NODE_MAP = {
-    "38.210.187.13": "co-main",
-    "181.78.246.211": "ec-main",
+    "38.210.187.13": "co-main",   # Colombia
+    "181.78.246.211": "ec-main",  # Esmeraldas (Astra)
+    "45.70.202.171": "ec-quito",  # Quito (Astra)
 }
 
 
