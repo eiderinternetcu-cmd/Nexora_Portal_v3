@@ -1,0 +1,101 @@
+name: tests
+
+# Runs the full suite against real PostgreSQL + Redis so the PR cannot pass with
+# falsely-green (skipped) tests. REQUIRE_TEST_DB=1 makes a missing DB fail loudly.
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: nexora_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d nexora_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 15
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 15
+
+    env:
+      # Test wiring (the conftest guard fails if TEST_DATABASE_URL is missing)
+      TEST_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/nexora_test
+      TEST_REDIS_URL: redis://localhost:6379/15
+      REQUIRE_TEST_DB: "1"
+      # P0 feature flags — default OFF (no behavior change)
+      JWT_REQUIRE_AUD: "false"
+      ENTITLEMENT_ENFORCE: "false"
+      SIGNED_URL_ENFORCE: "false"
+      # App settings consumed by alembic env.py (settings.database_url) + Redis
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: nexora_test
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      REDIS_HOST: localhost
+      REDIS_PORT: "6379"
+      SECRET_KEY: ci-only-secret-not-used-anywhere-0123456789abcdef
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Wait for PostgreSQL and Redis
+        run: |
+          python - <<'PY'
+          import os, time, sys
+          import psycopg, redis
+          dsn = f"host={os.environ['POSTGRES_HOST']} port={os.environ['POSTGRES_PORT']} dbname={os.environ['POSTGRES_DB']} user={os.environ['POSTGRES_USER']} password={os.environ['POSTGRES_PASSWORD']}"
+          for _ in range(30):
+              try:
+                  psycopg.connect(dsn).close(); break
+              except Exception:
+                  time.sleep(2)
+          else:
+              print("PostgreSQL not ready"); sys.exit(1)
+          for _ in range(30):
+              try:
+                  redis.Redis(host=os.environ['REDIS_HOST'], port=int(os.environ['REDIS_PORT'])).ping(); break
+              except Exception:
+                  time.sleep(2)
+          else:
+              print("Redis not ready"); sys.exit(1)
+          print("PostgreSQL + Redis ready")
+          PY
+
+      - name: Validate migrations (alembic upgrade head)
+        run: alembic upgrade head
+
+      - name: Run test suite
+        run: python -m pytest -q
