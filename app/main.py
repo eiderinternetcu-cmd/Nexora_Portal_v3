@@ -105,9 +105,19 @@ app.add_middleware(RateLimitMiddleware)
 
 @app.exception_handler(NexoraException)
 async def nexora_exception_handler(request: Request, exc: NexoraException):
+    # Consistent contract: `error` is ALWAYS a string. A structured detail
+    # ({"reason_code","message"}) is flattened to error=message + reason_code.
+    detail = exc.detail
+    content: dict = {"success": False}
+    if isinstance(detail, dict):
+        content["error"] = detail.get("message", "error")
+        if detail.get("reason_code"):
+            content["reason_code"] = detail["reason_code"]
+    else:
+        content["error"] = detail
     return JSONResponse(
         status_code=exc.status_code,
-        content={"success": False, "error": exc.detail},
+        content=content,
         headers=getattr(exc, "headers", None),
     )
 

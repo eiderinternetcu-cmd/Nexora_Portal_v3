@@ -11,6 +11,10 @@ from app.core.security import (
     create_client_access_token,
     create_client_refresh_token,
     decode_client_token,
+    enforce_surface,
+    TYPE_CLIENT_REFRESH,
+    AUD_CLIENT,
+    LEGACY_CLIENT_REFRESH,
 )
 from app.core.exceptions import unauthorized
 from app.redis_client import key_client, key_client_refresh, key_login_attempts, key_lockout
@@ -108,13 +112,14 @@ class ClientAuthService:
         """Returns (access_token, new_refresh_token, subscriber_id_str, expires_in_seconds).
         Rotates the refresh token — consumes old, issues new.
         """
+        # enforce_surface honors JWT_REQUIRE_AUD: strict → require client_refresh +
+        # aud=nexora-client + iss; compat → accept client_refresh only. An admin/
+        # playback token is rejected (cross-surface).
         try:
             payload = decode_client_token(refresh_token_str)
+            enforce_surface(payload, TYPE_CLIENT_REFRESH, AUD_CLIENT, LEGACY_CLIENT_REFRESH)
         except InvalidTokenError:
             raise unauthorized("Invalid or expired refresh token")
-
-        if payload.get("type") != "client_refresh":
-            raise unauthorized("Expected client refresh token")
 
         jti = payload.get("jti")
         sub_id_str = payload.get("sub")

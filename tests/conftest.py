@@ -18,6 +18,17 @@ from app.database import Base
 import app.models  # noqa: F401  ensure all models are registered on Base.metadata
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
+TEST_REDIS_URL = os.environ.get("TEST_REDIS_URL", "redis://redis:6379/15")
+
+# CI guard: in a full test environment, set REQUIRE_TEST_DB=1 so a missing
+# TEST_DATABASE_URL fails LOUDLY at collection instead of silently skipping
+# every DB test (which would be a false green). Locally (no REQUIRE_TEST_DB)
+# DB-dependent tests are skipped — see the db_session fixture.
+if os.environ.get("REQUIRE_TEST_DB") and not TEST_DATABASE_URL:
+    raise RuntimeError(
+        "REQUIRE_TEST_DB is set but TEST_DATABASE_URL is missing — refusing to "
+        "report a false green. Provide TEST_DATABASE_URL (and TEST_REDIS_URL)."
+    )
 
 pytestmark = pytest.mark.skipif(
     not TEST_DATABASE_URL, reason="TEST_DATABASE_URL not set"

@@ -9,13 +9,12 @@ Nginx). It performs an authorization check; it returns no stream data.
 """
 from urllib.parse import urlsplit, parse_qs
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 import redis.asyncio as aioredis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.redis_client import get_redis
-from fastapi import Depends
 from app.services.stream_auth_service import StreamAuthService
 
 router = APIRouter(prefix="/internal/stream-auth", tags=["Internal — Stream Auth"])
