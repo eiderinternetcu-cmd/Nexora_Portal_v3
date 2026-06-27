@@ -2,6 +2,7 @@
 Security — JWT con PyJWT + Argon2id via passlib.
 Reemplaza python-jose (incompatible con Python 3.14 sin compilador Rust).
 """
+import hashlib
 import uuid
 from datetime import datetime, timezone, timedelta
 
@@ -23,6 +24,13 @@ pwd_context = CryptContext(
     argon2__parallelism=4,
     argon2__type="ID",           # Argon2id
 )
+
+
+def hash_ip(ip: str | None) -> str:
+    """Non-reversible, salted hash of a client IP (for token binding / grant keys).
+    Never store the raw IP. Empty/None → stable hash of empty (callers should
+    refuse correlation when the IP is unknown)."""
+    return hashlib.sha256(f"{settings.jwt_issuer}:{ip or ''}".encode()).hexdigest()[:32]
 
 
 def hash_password(password: str) -> str:

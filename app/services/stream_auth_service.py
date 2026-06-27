@@ -39,7 +39,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.core.security import AUD_PLAYBACK, TYPE_PLAYBACK
+from app.core.security import AUD_PLAYBACK, TYPE_PLAYBACK, hash_ip
+from app.redis_client import key_stream_grant
 from app.services.entitlement_service import EntitlementService
 
 logger = logging.getLogger(__name__)
@@ -162,12 +163,14 @@ class StreamAuthService:
         channel_key: str | None = None,
         stream_key: str | None = None,
         node: str | None = None,
+        client_ip: str | None = None,
     ) -> tuple[str, str, int]:
         """Returns (encoded_token, playback_jti, ttl_seconds).
 
         Playback token (type=playback_token, aud=nexora-playback, iss=nexora-api).
         Bound to subscriber(sub) + device(dev) + session(ses) + channel(chn) +
-        stream_key(sk) + node, so a token is only valid for its exact stream.
+        stream_key(sk) + node + client-IP hash(cip), so a token is only valid for
+        its exact stream and (under IP binding) its issuing client.
         """
         jti = str(uuid.uuid4())
         ttl = settings.playback_token_expire_seconds
@@ -179,6 +182,7 @@ class StreamAuthService:
             "chn": channel_key,
             "sk": stream_key,
             "node": node,
+            "cip": hash_ip(client_ip) if client_ip else None,
             "type": TYPE_PLAYBACK,
             "aud": AUD_PLAYBACK,
             "iss": settings.jwt_issuer,
@@ -328,7 +332,7 @@ class StreamAuthService:
 
         token, jti, ttl = self._issue_jwt(
             sub.id, device.id, session_jti,
-            channel_key=channel_key, stream_key=channel_id, node=node,
+            channel_key=channel_key, stream_key=channel_id, node=node, client_ip=ip,
         )
         await self._store_jwt(jti, sub.id, device.id, session_jti, channel_id, ttl)
         return self._build_result(token, jti, session_jti, ttl, sub.id, device.id, channel_id)
@@ -376,10 +380,11 @@ class StreamAuthService:
         token: str | None,
         stream_key: str | None = None,
         node: str | None = None,
+        client_ip: str | None = None,
     ) -> dict:
         """Validate a playback token for a concrete /stream/* request.
 
-        Designed for the Nginx auth_request → FastAPI gate (FASE 5).
+        Designed for the Nginx auth_request → FastAPI gate.
         Checks (fast → slow):
           1. token present, signature + exp + type=playback_token  (_decode_jwt)
           2. aud=nexora-playback, iss=nexora-api
@@ -387,7 +392,8 @@ class StreamAuthService:
           4. ZSET connection alive for this device
           5. IPTV session not revoked/expired
           6. stream_key / node bound to the token (no cross-stream reuse)
-        Returns a SAFE payload dict. Raises NexoraException(401/403) on failure.
+          7. client IP binding (C-PROD-2) per playback_ip_binding_mode
+        Returns a SAFE payload dict (incl. session_id). Raises 401/403 on failure.
         """
         if not token:
             raise NexoraException(401, "Missing playback token")
@@ -417,14 +423,45 @@ class StreamAuthService:
         if node is not None and payload.get("node") not in (None, node):
             raise NexoraException(403, "Playback token not valid for this node")
 
+        # 7. IP binding (C-PROD-2). off → skip; soft → warn; strict → 403 on mismatch.
+        mode = settings.playback_ip_binding_mode
+        token_cip = payload.get("cip")
+        if mode != "off" and token_cip and client_ip:
+            if token_cip != hash_ip(client_ip):
+                if mode == "strict":
+                    raise NexoraException(403, "Playback token IP mismatch")
+                logger.warning("playback IP mismatch (soft): jti=%s", jti)
+
         return {
             "subscriber_id": subscriber_id_str,
             "device_id": device_id_str,
+            "session_id": ses,
             "channel_id": payload.get("chn"),
             "stream_key": payload.get("sk"),
             "node": payload.get("node"),
             "expires_at": payload.get("exp"),
         }
+
+    # ── Segment grant cache (C-PROD-1) ─────────────────────────────────────────
+
+    async def grant_stream_access(
+        self, node: str, stream_key: str, ip_hash: str, session_id: str | None
+    ) -> None:
+        """Seed a short-lived grant after a token-validated manifest request, so
+        tokenless HLS segments of the SAME node+stream+client IP can pass."""
+        ttl = settings.stream_auth_cache_ttl_seconds
+        await self.redis.setex(
+            key_stream_grant(node, stream_key, ip_hash), ttl, session_id or "1"
+        )
+
+    async def check_stream_grant(self, node: str, stream_key: str, ip_hash: str) -> bool:
+        """Return True if a valid grant exists for this node+stream+client IP,
+        renewing its TTL (sliding window while segments keep flowing)."""
+        key = key_stream_grant(node, stream_key, ip_hash)
+        if not await self.redis.exists(key):
+            return False
+        await self.redis.expire(key, settings.stream_auth_cache_ttl_seconds)
+        return True
 
     async def create_token(
         self,

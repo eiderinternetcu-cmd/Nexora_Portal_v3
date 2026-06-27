@@ -44,6 +44,10 @@ class Settings(BaseSettings):
     heartbeat_ttl_seconds: int = 180        # auto-disconnect after 3 missed heartbeats
     playback_token_expire_seconds: int = 60 # short-lived: 30-120s for HLS/Flussonic
 
+    # Pre-prod hardening (C-PROD-1 / C-PROD-2)
+    stream_auth_cache_ttl_seconds: int = 180   # segment grant cache TTL (manifest seeds it)
+    playback_ip_binding_mode: str = "off"      # off | soft | strict (default off — no break)
+
     # Client (subscriber) tokens — longer-lived for mobile/TV apps
     client_access_token_expire_hours: int = 24
     client_refresh_token_expire_days: int = 90

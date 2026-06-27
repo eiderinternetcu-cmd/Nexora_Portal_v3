@@ -15,9 +15,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.redis_client import get_redis
+from app.core.security import hash_ip
+from app.core.exceptions import NexoraException
 from app.services.stream_auth_service import StreamAuthService
 
 router = APIRouter(prefix="/internal/stream-auth", tags=["Internal — Stream Auth"])
+
+
+def _client_ip(request: Request) -> str | None:
+    """Client IP as set by the trusted edge (Nginx). Prefer X-Real-IP, then the
+    first hop of X-Forwarded-For. The endpoint is edge-internal (see Nginx
+    `internal` location), so these headers come from Nginx, not the public XFF."""
+    xri = request.headers.get("X-Real-IP")
+    if xri:
+        return xri.strip()
+    xff = request.headers.get("X-Forwarded-For")
+    if xff:
+        return xff.split(",")[0].strip()
+    return None
 
 
 def _extract(request: Request) -> tuple[str | None, str | None, str | None]:
@@ -28,8 +43,8 @@ def _extract(request: Request) -> tuple[str | None, str | None, str | None]:
     original /stream/<node>/<stream_key>/... path and its ?token=.
     """
     token = request.query_params.get("token") or request.headers.get("X-Playback-Token")
-    stream_key = request.query_params.get("stream_key")
-    node = request.query_params.get("node")
+    stream_key = request.query_params.get("stream_key") or request.headers.get("X-Stream-Key")
+    node = request.query_params.get("node") or request.headers.get("X-Stream-Node")
 
     original = request.headers.get("X-Original-URI")
     if original and (not token or not stream_key or not node):
@@ -52,8 +67,31 @@ async def validate_stream(
     db: AsyncSession = Depends(get_db),
     redis: aioredis.Redis = Depends(get_redis),
 ):
+    """Edge auth gate for /stream/*.
+
+    - Request WITH token (HLS manifest): full token validation + IP binding, then
+      seed a short-lived grant so tokenless segments of the same node+stream+IP pass.
+    - Request WITHOUT token (HLS segment): allow only if a valid grant exists for
+      this node+stream+client IP (seeded by a prior manifest). Otherwise 401.
+    Raises NexoraException(401/403) on failure → handled by the global handler.
+    """
     token, stream_key, node = _extract(request)
+    client_ip = _client_ip(request)
     svc = StreamAuthService(db, redis)
-    # Raises NexoraException(401/403) on failure → handled by the global handler.
-    result = await svc.validate_stream_request(token, stream_key=stream_key, node=node)
-    return {"ok": True, "channel_id": result.get("channel_id")}
+
+    if token:
+        out = await svc.validate_stream_request(
+            token, stream_key=stream_key, node=node, client_ip=client_ip
+        )
+        g_node = out.get("node") or node
+        g_key = out.get("stream_key") or stream_key
+        if g_node and g_key:
+            await svc.grant_stream_access(g_node, g_key, hash_ip(client_ip), out.get("session_id"))
+        return {"ok": True, "channel_id": out.get("channel_id")}
+
+    # Tokenless (segment): must be covered by a grant from a prior manifest.
+    if not (node and stream_key):
+        raise NexoraException(401, "Missing playback token")
+    if not await svc.check_stream_grant(node, stream_key, hash_ip(client_ip)):
+        raise NexoraException(401, "No stream authorization for this segment")
+    return {"ok": True}
