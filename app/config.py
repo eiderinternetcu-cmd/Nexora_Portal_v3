@@ -68,6 +68,12 @@ class Settings(BaseSettings):
     flussonic_co_main_user: str = ""
     flussonic_co_main_password: str = ""
 
+    # ec-quito (Ecuador — Quito Astra). base_url should be SAME-ORIGIN in prod
+    # (https://<domain>/stream/ec-quito); credentials live ONLY here.
+    flussonic_ec_quito_base_url: str = ""
+    flussonic_ec_quito_user: str = ""
+    flussonic_ec_quito_password: str = ""
+
     @property
     def database_url(self) -> str:
         """Async URL for SQLAlchemy create_async_engine (psycopg3)."""

@@ -196,7 +196,7 @@ _node_clients: dict[str, FlussonicClient] = {}
 def get_flussonic_node_client(node_id: str) -> FlussonicClient | None:
     """Return the FlussonicClient for a specific node ID.
 
-    Supported nodes: 'ec-main', 'co-main'.
+    Supported nodes: 'ec-main', 'co-main', 'ec-quito'.
     Returns None if the node is not configured (missing base_url or credentials).
     Phase 4.4 will replace this with a full FlussonicNodeRegistry.
     """
@@ -218,6 +218,12 @@ def get_flussonic_node_client(node_id: str) -> FlussonicClient | None:
             base_url=s.flussonic_co_main_base_url,
             user=s.flussonic_co_main_user,
             password=s.flussonic_co_main_password,
+        )
+    elif node_id == "ec-quito":
+        client = FlussonicClient(
+            base_url=s.flussonic_ec_quito_base_url,
+            user=s.flussonic_ec_quito_user,
+            password=s.flussonic_ec_quito_password,
         )
     else:
         logger.warning("Unknown Flussonic node_id: %s", node_id)
