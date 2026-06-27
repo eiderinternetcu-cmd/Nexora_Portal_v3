@@ -10,6 +10,7 @@ Run inside Docker after migration 004:
 Idempotent: safe to run multiple times.
 """
 import asyncio
+import os
 import sys
 from pathlib import Path
 
@@ -24,10 +25,17 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.database import AsyncSessionLocal
 from app.models.channel import Channel  # noqa: E402
 
-# ── Node base URLs — used to build source_url fallback ────────────────────────
-
-_EC_MAIN = "http://181.78.246.211:8002"
-_CO_MAIN = "http://38.210.187.13:8002"
+# ── Playback target safety (C-PROD: never persist a direct-origin source_url) ──
+# The playback URL must stay SAME-ORIGIN so the Nginx auth_request gate applies.
+# We never store the Flussonic/Astra origin (http://IP:8002/...). The channel keeps
+# flussonic_node + stream_key + hls_path; the playback resolver builds the URL from
+# the node's base (same-origin in production).
+#   CHANNEL_SOURCE_URL_MODE:
+#     relative (default) → /stream/<node>/<stream_key>/<hls_path>  (same-origin everywhere)
+#     node               → source_url = NULL (resolver builds it from the node base)
+#     absolute           → {STREAM_PUBLIC_BASE_URL}/stream/<node>/<stream_key>/<hls_path>
+_SOURCE_MODE = (os.environ.get("CHANNEL_SOURCE_URL_MODE") or "relative").lower()
+_PUBLIC_BASE = (os.environ.get("STREAM_PUBLIC_BASE_URL") or "").rstrip("/")
 
 # ── Channel catalog ───────────────────────────────────────────────────────────
 
@@ -204,15 +212,18 @@ CHANNELS = [
     },
 ]
 
-_NODE_BASE = {
-    "ec-main": _EC_MAIN,
-    "co-main": _CO_MAIN,
-}
-
-
-def _build_source_url(stream_key: str, node: str, hls_path: str = "index.m3u8") -> str:
-    base = _NODE_BASE.get(node, _EC_MAIN)
-    return f"{base}/{stream_key}/{hls_path}"
+def _safe_source_url(stream_key: str, node: str, hls_path: str = "index.m3u8") -> str | None:
+    """Same-origin (or NULL) playback target — NEVER a direct origin IP:port URL."""
+    if _SOURCE_MODE == "relative":
+        return f"/stream/{node}/{stream_key}/{hls_path}"
+    if _SOURCE_MODE == "absolute":
+        if not _PUBLIC_BASE.startswith("https://"):
+            raise SystemExit(
+                "CHANNEL_SOURCE_URL_MODE=absolute requires STREAM_PUBLIC_BASE_URL=https://<domain>"
+            )
+        return f"{_PUBLIC_BASE}/stream/{node}/{stream_key}/{hls_path}"
+    # default 'node': store nothing; resolver builds same-origin from the node base
+    return None
 
 
 def _enrich(ch: dict) -> dict:
@@ -227,7 +238,7 @@ def _enrich(ch: dict) -> dict:
         "flussonic_node": node,
         "hls_path": "index.m3u8",
         "source_type": "flussonic",
-        "source_url": _build_source_url(ch["stream_key"], node),
+        "source_url": _safe_source_url(ch["stream_key"], node),
         "is_active": True,
         "requires_subscription": True,
     }
