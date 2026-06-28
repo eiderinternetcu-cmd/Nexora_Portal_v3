@@ -52,13 +52,25 @@ sudo docker run --rm -p 80:80 \
 ```
 
 ## 5. Levantar servicios (flags OFF)
+El stack **base** = PostgreSQL + Redis + API + Nginx. El **web player es OPCIONAL**
+(profile `webplayer`) y **no es requerido** para arrancar ni para validar el P0.
 ```bash
+# stack base (SIN web player) — debe arrancar y pasar nginx -t:
 docker compose -f docker-compose.staging.yml --env-file .env.staging up -d --build
 curl -fsS http://127.0.0.1:8000/health          # API ok
-docker compose -f docker-compose.staging.yml exec nginx nginx -t   # conf ok
-# (opcional) web player:
+docker compose -f docker-compose.staging.yml exec nginx nginx -t   # conf ok (sin web player)
+
+# (OPCIONAL) levantar el web player:
 docker compose -f docker-compose.staging.yml --profile webplayer up -d
 ```
+> **Fix aplicado durante el staging real:** la location `/` del web player en
+> `deploy/nginx/nexoraplay.staging.conf` usaba `proxy_pass http://nexora_web_player_staging:80`
+> (upstream estático). Nginx resuelve ese nombre **al arrancar** y fallaba con
+> `host not found in upstream` cuando el web player **no** estaba levantado, tumbando
+> todo el edge. Ahora usa el **resolver de Docker (127.0.0.11) + variable** en
+> `proxy_pass`, de modo que Nginx **arranca igual sin web player** (la API y `/stream/*`
+> siguen operando) y devuelve 404 en `/` cuando el player está ausente. El web player
+> sigue funcionando cuando se activa el profile `webplayer`.
 
 ## 6. DB: migraciones + import + seed + auditoría
 ```bash
