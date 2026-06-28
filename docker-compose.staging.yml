@@ -9,7 +9,9 @@
 #   docker compose -f docker-compose.staging.yml --profile webplayer up -d
 #
 # Secrets live ONLY in .env.staging (gitignored). Never commit .env.staging.
-version: "3.9"
+#
+# Base stack = postgres + redis + api + nginx. The web_player is OPTIONAL
+# (profile "webplayer") and is NOT required for the base stack to start.
 
 services:
   postgres:
