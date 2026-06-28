@@ -12,6 +12,9 @@ venv/
 # Secrets / env
 .env
 .env.*
+# …but allow placeholder templates (no real secrets) to be versioned:
+!.env.example
+!.env.*.example
 
 # Claude Code — credenciales locales (SSH password, tokens)
 .claude/settings.json
