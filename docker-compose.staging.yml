@@ -1,0 +1,105 @@
+# Staging-only compose for REAL staging validation of PR #1.
+# NOT for production. NOT for local dev (that is docker-compose.yml).
+# Internal services bind to 127.0.0.1 only; Nginx is the public edge (80/443).
+# Build the API from the PR #1 branch (feat/p0-auth-playback-entitlements).
+#
+# Usage (on the staging host, after creating .env.staging):
+#   docker compose -f docker-compose.staging.yml --env-file .env.staging up -d --build
+#   # optional web player:
+#   docker compose -f docker-compose.staging.yml --profile webplayer up -d
+#
+# Secrets live ONLY in .env.staging (gitignored). Never commit .env.staging.
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: nexora_postgres_staging
+    env_file: .env.staging
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-nexora_staging}
+      POSTGRES_USER: ${POSTGRES_USER:-nexora}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.staging}
+    volumes:
+      - nexora_staging_pgdata:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"        # local-only; never expose to the internet
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nexora}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [nexora_staging_net]
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: nexora_redis_staging
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - nexora_staging_redisdata:/data
+    ports:
+      - "127.0.0.1:6379:6379"        # local-only
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [nexora_staging_net]
+    restart: unless-stopped
+
+  api:
+    build: .                          # Dockerfile at repo root; checkout PR #1 first
+    container_name: nexora_api_staging
+    env_file: .env.staging
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    volumes:
+      - ./app:/app/app                # live code from the checked-out PR #1 branch
+      - ./migrations:/app/migrations
+      - ./scripts:/app/scripts
+      - ./alembic.ini:/app/alembic.ini
+    ports:
+      - "127.0.0.1:8000:8000"        # local-only; public access goes through Nginx
+    networks: [nexora_staging_net]
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    container_name: nexora_nginx_staging
+    depends_on: [api]
+    volumes:
+      - ./deploy/nginx/nexoraplay.staging.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./deploy/letsencrypt:/etc/letsencrypt:ro          # certs (certbot, host-managed)
+      - ./deploy/certbot-www:/var/www/certbot:ro          # ACME webroot
+    ports:
+      - "80:80"
+      - "443:443"
+    networks: [nexora_staging_net]
+    restart: unless-stopped
+
+  # Optional — does NOT block staging if it fails to build/start.
+  # Enable with:  docker compose -f docker-compose.staging.yml --profile webplayer up -d
+  web_player:
+    build:
+      context: ./web_player
+      dockerfile: Dockerfile
+    container_name: nexora_web_player_staging
+    profiles: ["webplayer"]
+    depends_on: [api]
+    networks: [nexora_staging_net]
+    restart: unless-stopped
+
+volumes:
+  nexora_staging_pgdata:
+  nexora_staging_redisdata:
+
+networks:
+  nexora_staging_net:
+    driver: bridge
