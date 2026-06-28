@@ -11,7 +11,16 @@ from sqlalchemy import select, update
 
 from app.config import get_settings
 from app.models.user import User
-from app.core.security import verify_password, create_access_token, create_refresh_token, decode_token
+from app.core.security import (
+    verify_password,
+    create_access_token,
+    create_refresh_token,
+    decode_claims,
+    enforce_surface,
+    TYPE_ADMIN_REFRESH,
+    AUD_ADMIN,
+    LEGACY_ADMIN_REFRESH,
+)
 from app.core.exceptions import unauthorized, locked
 from app.redis_client import key_login_attempts, key_lockout
 from app.services.session_service import SessionService
@@ -87,23 +96,29 @@ class AuthService:
         )
 
     async def refresh(self, refresh_token: str) -> TokenResponse:
+        # Validate as raw claims (no TokenPayload → no ValidationError/500 on a
+        # cross/incomplete token). enforce_surface honors JWT_REQUIRE_AUD:
+        # strict → require admin_refresh + aud=nexora-admin + iss; compat →
+        # accept {admin_refresh, refresh}. A client/playback token is rejected.
         try:
-            payload = decode_token(refresh_token)
+            claims = decode_claims(refresh_token)
+            enforce_surface(claims, TYPE_ADMIN_REFRESH, AUD_ADMIN, LEGACY_ADMIN_REFRESH)
         except InvalidTokenError:
             raise unauthorized("Invalid refresh token")
 
-        if payload.type != "refresh":
-            raise unauthorized("Expected refresh token")
+        jti = claims.get("jti")
+        user_id = claims.get("sub")
+        role = claims.get("role")
+        if not jti or not user_id or not role:
+            raise unauthorized("Malformed refresh token")
 
-        session = await self.sessions.get_refresh(payload.jti)
+        session = await self.sessions.get_refresh(jti)
         if not session:
             raise unauthorized("Refresh token expired or revoked")
 
         # Rotate: revoke old, issue new pair
-        await self.sessions.revoke_refresh(payload.jti)
+        await self.sessions.revoke_refresh(jti)
 
-        user_id = payload.sub
-        role = payload.role.value
         access_token, a_jti, expires_in = create_access_token(user_id, role)
         new_refresh, r_jti = create_refresh_token(user_id, role)
 
@@ -120,7 +135,9 @@ class AuthService:
         await self.sessions.revoke_access(access_jti)
         if refresh_token:
             try:
-                payload = decode_token(refresh_token)
-                await self.sessions.revoke_refresh(payload.jti)
+                claims = decode_claims(refresh_token)  # raw → no role requirement
+                jti = claims.get("jti")
+                if jti:
+                    await self.sessions.revoke_refresh(jti)
             except InvalidTokenError:
                 pass

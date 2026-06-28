@@ -35,6 +35,9 @@ class Plan(Base):
     subscriptions: Mapped[list["Subscription"]] = relationship(
         "Subscription", back_populates="plan", lazy="select"
     )
+    plan_channels: Mapped[list["PlanChannel"]] = relationship(
+        "PlanChannel", back_populates="plan", lazy="select", cascade="all, delete-orphan"
+    )
 
     def __repr__(self) -> str:
         return f"<Plan {self.name} ({self.duration_days}d)>"

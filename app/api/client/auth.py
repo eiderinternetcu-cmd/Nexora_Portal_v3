@@ -33,7 +33,7 @@ async def client_login(
     redis: aioredis.Redis = Depends(get_redis),
 ):
     svc = ClientAuthService(db, redis)
-    access_token, refresh_token, subscriber_id, expires_in = await svc.login(
+    access_token, refresh_token, subscriber_id, expires_in, device_registration = await svc.login(
         data=data,
         ip=_get_ip(request),
         user_agent=request.headers.get("User-Agent"),
@@ -44,6 +44,7 @@ async def client_login(
         refresh_token=refresh_token,
         expires_in=expires_in,
         subscriber_id=subscriber_id,
+        device_registration=device_registration,
     )
 
 

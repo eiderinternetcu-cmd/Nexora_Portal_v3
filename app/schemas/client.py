@@ -21,6 +21,8 @@ class ClientTokenResponse(BaseModel):
     token_type: str = "bearer"
     expires_in: int
     subscriber_id: str
+    # 'registered' | 'limit_reached' — login never fails on device cap (P0-003)
+    device_registration: str | None = None
 
 
 class ClientRefreshRequest(BaseModel):

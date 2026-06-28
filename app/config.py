@@ -13,6 +13,7 @@ class Settings(BaseSettings):
 
     # JWT
     jwt_algorithm: str = "HS256"
+    jwt_issuer: str = "nexora-api"
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 30
 
@@ -34,9 +35,18 @@ class Settings(BaseSettings):
     login_lockout_minutes: int = 15
     rate_limit_per_minute: int = 60
 
+    # Feature flags — P0 rollout (default OFF: validate+warn, do not block)
+    entitlement_enforce: bool = False   # True → playback denies channels not in plan_channels
+    jwt_require_aud: bool = False        # True → strict iss/aud/type per surface; False → legacy-compatible
+    signed_url_enforce: bool = False     # True → playback_url carries ?token= and /stream/* requires it
+
     # IPTV concurrency
     heartbeat_ttl_seconds: int = 180        # auto-disconnect after 3 missed heartbeats
     playback_token_expire_seconds: int = 60 # short-lived: 30-120s for HLS/Flussonic
+
+    # Pre-prod hardening (C-PROD-1 / C-PROD-2)
+    stream_auth_cache_ttl_seconds: int = 180   # segment grant cache TTL (manifest seeds it)
+    playback_ip_binding_mode: str = "off"      # off | soft | strict (default off — no break)
 
     # Client (subscriber) tokens — longer-lived for mobile/TV apps
     client_access_token_expire_hours: int = 24
@@ -57,6 +67,12 @@ class Settings(BaseSettings):
     flussonic_co_main_base_url: str = ""
     flussonic_co_main_user: str = ""
     flussonic_co_main_password: str = ""
+
+    # ec-quito (Ecuador — Quito Astra). base_url should be SAME-ORIGIN in prod
+    # (https://<domain>/stream/ec-quito); credentials live ONLY here.
+    flussonic_ec_quito_base_url: str = ""
+    flussonic_ec_quito_user: str = ""
+    flussonic_ec_quito_password: str = ""
 
     @property
     def database_url(self) -> str:

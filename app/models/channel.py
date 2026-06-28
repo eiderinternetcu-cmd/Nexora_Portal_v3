@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 from sqlalchemy import String, Boolean, Integer, DateTime
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import UUID
 from app.database import Base
 
@@ -32,6 +32,10 @@ class Channel(Base):
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    plan_channels: Mapped[list["PlanChannel"]] = relationship(
+        "PlanChannel", back_populates="channel", lazy="select", cascade="all, delete-orphan"
     )
 
     def __repr__(self) -> str:

@@ -77,3 +77,10 @@ def key_client(token_jti: str) -> str:
 def key_client_refresh(token_jti: str) -> str:
     """Client (subscriber) refresh token. TTL = client_refresh_token_expire_days."""
     return f"nexora:client_refresh:{token_jti}"
+
+
+def key_stream_grant(node: str, stream_key: str, ip_hash: str) -> str:
+    """Short-lived segment grant seeded by a token-validated manifest request.
+    Lets tokenless HLS segments (same node+stream+client IP) pass auth_request.
+    TTL = stream_auth_cache_ttl_seconds."""
+    return f"nexora:stream_grant:{node}:{stream_key}:{ip_hash}"

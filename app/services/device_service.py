@@ -10,7 +10,7 @@ from sqlalchemy import select, func
 from app.models.device import Device
 from app.models.subscription import Subscription
 from app.models.plan import Plan
-from app.core.exceptions import not_found, bad_request, forbidden
+from app.core.exceptions import not_found, bad_request, forbidden, NexoraException
 from app.redis_client import key_heartbeat
 from app.schemas.device import DeviceRegister, DeviceHeartbeat
 from app.services.connection_service import ConnectionService
@@ -61,7 +61,21 @@ class DeviceService:
         )
         return list(result.scalars().all())
 
-    async def register(self, subscriber_id: uuid.UUID, data: DeviceRegister, ip: str) -> Device:
+    async def register(
+        self,
+        subscriber_id: uuid.UUID,
+        data: DeviceRegister,
+        ip: str,
+        raise_on_limit: bool = True,
+    ) -> Device | None:
+        """Register or update a device.
+
+        - Existing device of this subscriber → updated and returned.
+        - New device under the plan limit → created and returned.
+        - New device over the plan limit:
+            raise_on_limit=True  → HTTP 409 DEVICE_LIMIT_REACHED  (explicit /devices/register)
+            raise_on_limit=False → returns None, creates nothing   (login path: never blocks)
+        """
         # Check existing
         existing = await self.get_by_device_id(data.device_id)
         if existing:
@@ -85,9 +99,15 @@ class DeviceService:
             _, plan = sub_plan
             current_count = await self._device_count(subscriber_id)
             if current_count >= plan.max_devices:
-                raise bad_request(
-                    f"Device limit reached ({plan.max_devices}). Remove a device before adding a new one."
-                )
+                if raise_on_limit:
+                    raise NexoraException(
+                        status_code=409,
+                        detail={
+                            "reason_code": "DEVICE_LIMIT_REACHED",
+                            "message": "Límite de dispositivos alcanzado. Libera un dispositivo para continuar.",
+                        },
+                    )
+                return None
 
         device = Device(
             subscriber_id=subscriber_id,

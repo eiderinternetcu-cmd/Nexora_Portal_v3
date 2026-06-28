@@ -11,6 +11,10 @@ from app.core.security import (
     create_client_access_token,
     create_client_refresh_token,
     decode_client_token,
+    enforce_surface,
+    TYPE_CLIENT_REFRESH,
+    AUD_CLIENT,
+    LEGACY_CLIENT_REFRESH,
 )
 from app.core.exceptions import unauthorized
 from app.redis_client import key_client, key_client_refresh, key_login_attempts, key_lockout
@@ -49,8 +53,14 @@ class ClientAuthService:
         data: ClientLoginRequest,
         ip: str,
         user_agent: str | None,
-    ) -> tuple[str, str, str, int]:
-        """Returns (access_token, refresh_token, subscriber_id_str, expires_in_seconds)."""
+    ) -> tuple[str, str, str, int, str]:
+        """Returns (access_token, refresh_token, subscriber_id_str, expires_in_seconds,
+        device_registration). device_registration is 'registered' or 'limit_reached'.
+
+        Login NEVER fails because of the device cap: identity/status/credentials
+        are validated, tokens are issued, and the device is registered only if
+        there is room (raise_on_limit=False).
+        """
         await self._check_lockout(data.username)
 
         stb = STBService(self.db, self.redis)
@@ -67,7 +77,7 @@ class ClientAuthService:
         await self._clear_failed_attempts(data.username)
 
         dev_svc = DeviceService(self.db, self.redis)
-        await dev_svc.register(
+        device = await dev_svc.register(
             subscriber.id,
             DeviceRegister(
                 device_id=data.device_id,
@@ -78,7 +88,9 @@ class ClientAuthService:
                 user_agent=user_agent,
             ),
             ip,
+            raise_on_limit=False,  # login must not fail on device cap
         )
+        device_registration = "registered" if device is not None else "limit_reached"
 
         sub_id_str = str(subscriber.id)
         access_token, access_jti, expires_in = create_client_access_token(sub_id_str)
@@ -94,19 +106,20 @@ class ClientAuthService:
             settings.client_refresh_token_expire_days * 86400,
             sub_id_str,
         )
-        return access_token, refresh_token, sub_id_str, expires_in
+        return access_token, refresh_token, sub_id_str, expires_in, device_registration
 
     async def refresh(self, refresh_token_str: str) -> tuple[str, str, str, int]:
         """Returns (access_token, new_refresh_token, subscriber_id_str, expires_in_seconds).
         Rotates the refresh token — consumes old, issues new.
         """
+        # enforce_surface honors JWT_REQUIRE_AUD: strict → require client_refresh +
+        # aud=nexora-client + iss; compat → accept client_refresh only. An admin/
+        # playback token is rejected (cross-surface).
         try:
             payload = decode_client_token(refresh_token_str)
+            enforce_surface(payload, TYPE_CLIENT_REFRESH, AUD_CLIENT, LEGACY_CLIENT_REFRESH)
         except InvalidTokenError:
             raise unauthorized("Invalid or expired refresh token")
-
-        if payload.get("type") != "client_refresh":
-            raise unauthorized("Expected client refresh token")
 
         jti = payload.get("jti")
         sub_id_str = payload.get("sub")

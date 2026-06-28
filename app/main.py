@@ -17,6 +17,7 @@ from app.api.admin.router import router as admin_router
 from app.api.stb.router import router as stb_router
 from app.api.subscriber.router import router as subscriber_router
 from app.api.client.router import router as client_router
+from app.api.internal.stream_auth import router as internal_stream_auth_router
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.core.exceptions import NexoraException
 
@@ -104,9 +105,19 @@ app.add_middleware(RateLimitMiddleware)
 
 @app.exception_handler(NexoraException)
 async def nexora_exception_handler(request: Request, exc: NexoraException):
+    # Consistent contract: `error` is ALWAYS a string. A structured detail
+    # ({"reason_code","message"}) is flattened to error=message + reason_code.
+    detail = exc.detail
+    content: dict = {"success": False}
+    if isinstance(detail, dict):
+        content["error"] = detail.get("message", "error")
+        if detail.get("reason_code"):
+            content["reason_code"] = detail["reason_code"]
+    else:
+        content["error"] = detail
     return JSONResponse(
         status_code=exc.status_code,
-        content={"success": False, "error": exc.detail},
+        content=content,
         headers=getattr(exc, "headers", None),
     )
 
@@ -127,6 +138,7 @@ app.include_router(admin_router)      # /api/admin/
 app.include_router(stb_router)        # /api/stb/
 app.include_router(subscriber_router) # /api/subscriber/
 app.include_router(client_router)     # /api/client/
+app.include_router(internal_stream_auth_router)  # /internal/stream-auth/ (edge auth_request)
 
 
 @app.get("/health", tags=["Health"])

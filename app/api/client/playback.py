@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, Query, Request
 import redis.asyncio as aioredis
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.database import get_db
 from app.redis_client import get_redis
 from app.core.dependencies import get_current_subscriber
@@ -20,6 +21,20 @@ from app.integrations.flussonic_client import get_flussonic_node_client
 from app.models.channel import Channel
 
 router = APIRouter(prefix="/playback", tags=["Client Playback"])
+
+settings = get_settings()
+
+
+def _maybe_sign(playback_url: str | None, token: str) -> str | None:
+    """Append ?token= to the playback_url only when SIGNED_URL_ENFORCE is on.
+
+    With the flag off the URL is returned unchanged (current behavior preserved);
+    the token still travels in the response body for the player to use.
+    """
+    if not playback_url or not settings.signed_url_enforce:
+        return playback_url
+    sep = "&" if "?" in playback_url else "?"
+    return f"{playback_url}{sep}token={token}"
 
 
 def _get_ip(request: Request) -> str:
@@ -77,6 +92,8 @@ async def authorize_playback(
         ch = await ChannelService(db).get_active_by_key(data.channel_id)
         stream_key = ch.stream_key
 
+    node = ch.flussonic_node if ch is not None else None
+
     svc = StreamAuthService(db, redis)
     result = await svc.authorize(
         subscriber_id=subscriber.id,
@@ -84,15 +101,18 @@ async def authorize_playback(
         channel_id=stream_key,
         ip=_get_ip(request),
         user_agent=request.headers.get("User-Agent"),
+        channel_key=data.channel_id,  # public key → EntitlementService
+        node=node,
     )
     await db.commit()
 
+    base_url = _resolve_playback_url(ch, stream_key)
     return PlaybackResponse(
         token=result.token,
         expires_in=result.expires_in,
         channel_id=data.channel_id,  # echo channel_key back — never stream_key
         subscriber_id=str(result.subscriber_id),
-        playback_url=_resolve_playback_url(ch, stream_key),
+        playback_url=_maybe_sign(base_url, result.token),
     )
 
 
