@@ -1,0 +1,14 @@
+# SSH Remote Server Inspector — Nexora MCP
+# Valores por defecto; todos sobreridables con variables de entorno.
+# NUNCA pongas contraseñas ni claves aquí — usar SSH_PASSWORD o SSH_KEY_PATH.
+
+ssh:
+  host: "45.184.225.4"
+  port: 22
+  user: "internet"
+  connect_timeout: 10        # segundos para establecer conexión
+  # key_path: ""             # ruta a clave privada SSH (override: SSH_KEY_PATH)
+
+policy:
+  read_only: true            # Solo comandos de lectura — nunca escribe en remoto
+  max_command_timeout: 30    # techo de timeout por comando (segundos)
