@@ -25,6 +25,31 @@ www.nexoraplay.net  A 45.184.225.4
 - `/api/` -> `nexora_api:8000`
 - `/docs`, `/redoc`, `/openapi.json` -> `nexora_api:8000`
 - `/health` and `/api/health` -> `nexora_api:8000/health`
+- `/stream/ec-main/*` -> `181.78.246.211:8002` (gated by `auth_request`)
+- `/stream/co-main/*` -> `38.210.187.13:8002` (gated by `auth_request`)
+
+The `/stream/*` routes keep HLS playback on HTTPS/same-origin so browsers do
+not block the player as mixed content.
+
+### Stream auth gate (FASE 2C — active in production)
+
+With `SIGNED_URL_ENFORCE=true`, `playback_url` carries `?token=<jwt>` and every
+`/stream/*` request is validated by FastAPI (`/internal/stream-auth/validate`)
+via Nginx `auth_request` before proxying to Flussonic (read-only, untouched):
+
+- Manifest with token → full token validation + seeds a short-lived Redis grant
+  (`nexora:stream_grant:{node}:{stream_key}:{ip_hash}`, TTL ~180s, renewed per request).
+- Tokenless segments/variant/manifest reloads of the **same** node+stream+client-IP
+  pass via that grant; cross-stream / other-node / other-IP without a grant → 401.
+- `log_format stream_safe` strips the `?token=` from `/stream` access logs.
+
+> **Nginx finding (important):** inside an `auth_request` subrequest,
+> `$request_uri` / `$args` / `$arg_token` resolve to the **subrequest**
+> (`/__stream_auth`), NOT the original request. The original URI + token are
+> captured in the `/stream/*` location (`set $stream_orig_uri $request_uri;`
+> `set $stream_token $arg_token;` — subrequests share the parent's `set` vars),
+> node/stream_key derived via `map`, and the token passed to the backend via the
+> `X-Playback-Token` header (kept out of logs). See `deploy/RUNBOOK_PRODUCTION_P0.md`.
 
 ## Deploy
 
@@ -73,5 +98,3 @@ After those checks pass:
 ```bash
 sudo bash scripts/lockdown_ufw_production.sh
 ```
-
-Signed Playback URLs are intentionally unchanged.
