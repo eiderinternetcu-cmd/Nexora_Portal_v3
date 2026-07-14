@@ -40,6 +40,13 @@ class Device(Base):
     # ── Network ───────────────────────────────────────────────────────────────
     last_ip: Mapped[str | None] = mapped_column(String(45))
 
+    # ── Strong identity (M1) ──────────────────────────────────────────────────
+    # High-entropy secret issued at registration; only its keyed hash is stored.
+    device_secret_hash: Mapped[str | None] = mapped_column(String(255))
+    # 'active' (default / legacy auto-register) | 'pending' (awaiting secret
+    # activation when DEVICE_SECRET_ENFORCE is on) | 'revoked'.
+    status: Mapped[str] = mapped_column(String(16), default="active", nullable=False, index=True)
+
     # ── State ─────────────────────────────────────────────────────────────────
     is_blocked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
     block_reason: Mapped[str | None] = mapped_column(String(255))

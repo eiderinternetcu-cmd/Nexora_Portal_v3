@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     entitlement_enforce: bool = False   # True → playback denies channels not in plan_channels
     jwt_require_aud: bool = False        # True → strict iss/aud/type per surface; False → legacy-compatible
     signed_url_enforce: bool = False     # True → playback_url carries ?token= and /stream/* requires it
+    device_secret_enforce: bool = False  # True → playback requires an activated device (secret verified); False → legacy auto-register
 
     # IPTV concurrency
     heartbeat_ttl_seconds: int = 180        # auto-disconnect after 3 missed heartbeats
@@ -47,6 +48,11 @@ class Settings(BaseSettings):
     # Pre-prod hardening (C-PROD-1 / C-PROD-2)
     stream_auth_cache_ttl_seconds: int = 180   # segment grant cache TTL (manifest seeds it)
     playback_ip_binding_mode: str = "off"      # off | soft | strict (default off — no break)
+
+    # Grant hardening (M1). Bound the absolute life of a segment grant so a revoked
+    # session cannot keep an in-flight stream alive indefinitely via renewal.
+    stream_grant_max_lifetime_seconds: int = 0   # 0 = unbounded (legacy); >0 = absolute cap from first seed
+    stream_grant_token_fallback: bool = True     # token present-but-expired falls back to a valid grant (continuity)
 
     # Client (subscriber) tokens — longer-lived for mobile/TV apps
     client_access_token_expire_hours: int = 24

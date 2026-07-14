@@ -102,6 +102,10 @@ class StreamAuthService:
             raise NexoraException(403, "DEVICE_NOT_REGISTERED")
         if device.is_blocked:
             raise NexoraException(403, "DEVICE_BLOCKED")
+        # M1: under enforcement a device must be activated (secret verified) before
+        # playback. Flag off → all devices are 'active', so this never triggers.
+        if settings.device_secret_enforce and device.status != "active":
+            raise NexoraException(403, "DEVICE_NOT_ACTIVATED")
         return device
 
     async def _load_active_subscription(
@@ -448,19 +452,48 @@ class StreamAuthService:
         self, node: str, stream_key: str, ip_hash: str, session_id: str | None
     ) -> None:
         """Seed a short-lived grant after a token-validated manifest request, so
-        tokenless HLS segments of the SAME node+stream+client IP can pass."""
-        ttl = settings.stream_auth_cache_ttl_seconds
+        tokenless HLS segments of the SAME node+stream+client IP can pass.
+
+        The value stores the seed epoch so check_stream_grant can enforce an
+        absolute lifetime cap (M1) — otherwise renewal keeps a grant alive forever
+        and a revoked session's stream never dies while segments keep flowing.
+        """
+        cache_ttl = settings.stream_auth_cache_ttl_seconds
+        max_life = settings.stream_grant_max_lifetime_seconds
+        ttl = min(cache_ttl, max_life) if max_life > 0 else cache_ttl
+        seed = int(datetime.now(timezone.utc).timestamp())
         await self.redis.setex(
-            key_stream_grant(node, stream_key, ip_hash), ttl, session_id or "1"
+            key_stream_grant(node, stream_key, ip_hash), ttl, f"{session_id or '1'}|{seed}"
         )
 
     async def check_stream_grant(self, node: str, stream_key: str, ip_hash: str) -> bool:
         """Return True if a valid grant exists for this node+stream+client IP,
-        renewing its TTL (sliding window while segments keep flowing)."""
+        renewing its TTL (sliding window). If stream_grant_max_lifetime_seconds > 0,
+        the grant dies once its age since the first seed reaches that cap, regardless
+        of renewal — bounding revocation latency."""
         key = key_stream_grant(node, stream_key, ip_hash)
-        if not await self.redis.exists(key):
+        value = await self.redis.get(key)
+        if value is None:
             return False
-        await self.redis.expire(key, settings.stream_auth_cache_ttl_seconds)
+        cache_ttl = settings.stream_auth_cache_ttl_seconds
+        max_life = settings.stream_grant_max_lifetime_seconds
+        new_ttl = cache_ttl
+        if max_life > 0:
+            seed = None
+            if isinstance(value, (bytes, bytearray)):
+                value = value.decode()
+            if "|" in str(value):
+                try:
+                    seed = int(str(value).rsplit("|", 1)[1])
+                except ValueError:
+                    seed = None
+            if seed is not None:
+                age = int(datetime.now(timezone.utc).timestamp()) - seed
+                if age >= max_life:
+                    await self.redis.delete(key)   # absolute cap reached → grant dies
+                    return False
+                new_ttl = min(cache_ttl, max_life - age)
+        await self.redis.expire(key, max(new_ttl, 1))
         return True
 
     async def create_token(

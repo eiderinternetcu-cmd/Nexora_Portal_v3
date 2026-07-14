@@ -23,6 +23,11 @@ class DeviceBlockRequest(BaseModel):
     reason: str | None = Field(None, max_length=255)
 
 
+class DeviceActivateRequest(BaseModel):
+    device_id: str = Field(..., min_length=6, max_length=128)
+    device_secret: str = Field(..., min_length=16, max_length=128)
+
+
 class DeviceOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -36,7 +41,13 @@ class DeviceOut(BaseModel):
     app_version: str | None
     os_version: str | None
     last_ip: str | None
+    status: str
     is_blocked: bool
     block_reason: str | None
     last_seen_at: datetime | None
     registered_at: datetime
+
+
+class DeviceRegisterResponse(DeviceOut):
+    # Present ONLY on a fresh registration — the plaintext device secret, shown once.
+    device_secret: str | None = None
