@@ -9,6 +9,11 @@ __pycache__/
 .venv/
 venv/
 
+# Caches de herramientas
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
 # Secrets / env
 .env
 .env.*
@@ -16,9 +21,9 @@ venv/
 !.env.example
 !.env.*.example
 
-# Claude Code — credenciales locales (SSH password, tokens)
-.claude/settings.json
-.claude/settings.local.json
+# Claude Code — config local del agente (contiene SSH password en settings.json)
+.claude/
 
 # Deploy scripts con rutas/info del servidor
 mcp_server/_check_build.py
+.ssh_known_hosts
