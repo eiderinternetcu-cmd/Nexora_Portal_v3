@@ -13,11 +13,14 @@ from fastapi import APIRouter, Depends, Request
 import redis.asyncio as aioredis
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.database import get_db
 from app.redis_client import get_redis
 from app.core.security import hash_ip
 from app.core.exceptions import NexoraException
 from app.services.stream_auth_service import StreamAuthService
+
+settings = get_settings()
 
 router = APIRouter(prefix="/internal/stream-auth", tags=["Internal — Stream Auth"])
 
@@ -80,9 +83,22 @@ async def validate_stream(
     svc = StreamAuthService(db, redis)
 
     if token:
-        out = await svc.validate_stream_request(
-            token, stream_key=stream_key, node=node, client_ip=client_ip
-        )
+        try:
+            out = await svc.validate_stream_request(
+                token, stream_key=stream_key, node=node, client_ip=client_ip
+            )
+        except NexoraException:
+            # Continuity (M1): a present-but-expired/invalid token still passes if a
+            # valid grant already exists for this node+stream+IP (seeded by a prior
+            # valid manifest from the same client). Guards a token expiring mid-session
+            # between renewals. No grant → propagate the original deny.
+            if (
+                settings.stream_grant_token_fallback
+                and node and stream_key
+                and await svc.check_stream_grant(node, stream_key, hash_ip(client_ip))
+            ):
+                return {"ok": True}
+            raise
         g_node = out.get("node") or node
         g_key = out.get("stream_key") or stream_key
         if g_node and g_key:

@@ -63,6 +63,25 @@ async def redis_client():
     await r.aclose()
 
 
+@pytest_asyncio.fixture(autouse=True)
+async def _isolate_global_redis():
+    """app.redis_client.get_redis() is a module-level singleton, and code paths
+    that bypass FastAPI dependency overrides (e.g. the rate-limit middleware) use
+    it directly. Under function-scoped event loops that singleton would bind to
+    the first test's loop and later raise 'attached to a different loop' /
+    'Event loop is closed'. Null it before each test (recreated fresh in THIS
+    loop on demand) and close the per-test instance in the same loop afterwards."""
+    import app.redis_client as rc
+    rc._redis = None
+    yield
+    if rc._redis is not None:
+        try:
+            await rc._redis.aclose()
+        except Exception:
+            pass
+        rc._redis = None
+
+
 @pytest_asyncio.fixture
 async def entitlement_world(db_session):
     """Create a coherent subscriber+plan+subscription+device+channel graph.

@@ -10,11 +10,19 @@ from sqlalchemy import select, func
 from app.models.device import Device
 from app.models.subscription import Subscription
 from app.models.plan import Plan
+from app.config import get_settings
 from app.core.exceptions import not_found, bad_request, forbidden, NexoraException
+from app.core.security import (
+    generate_device_secret,
+    hash_device_secret,
+    verify_device_secret,
+)
 from app.redis_client import key_heartbeat
 from app.schemas.device import DeviceRegister, DeviceHeartbeat
 from app.services.connection_service import ConnectionService
 from app.services.session_service import SessionService
+
+settings = get_settings()
 
 
 class DeviceService:
@@ -109,6 +117,12 @@ class DeviceService:
                     )
                 return None
 
+        # M1: issue a high-entropy secret for the new device (store only its hash).
+        # The plaintext is attached transiently as `plaintext_secret` so the caller
+        # can surface it ONCE; it is never persisted or returned again.
+        # New devices start 'pending' when enforcement is on (must be activated with
+        # the secret before playback); 'active' otherwise → legacy behavior preserved.
+        plaintext_secret = generate_device_secret()
         device = Device(
             subscriber_id=subscriber_id,
             device_id=data.device_id,
@@ -121,8 +135,30 @@ class DeviceService:
             user_agent=data.user_agent,
             last_ip=ip,
             last_seen_at=datetime.now(timezone.utc),
+            device_secret_hash=hash_device_secret(plaintext_secret),
+            status="pending" if settings.device_secret_enforce else "active",
         )
         self.db.add(device)
+        await self.db.flush()
+        device.plaintext_secret = plaintext_secret  # transient, not a column
+        return device
+
+    async def verify_secret(self, device_id: str, secret: str) -> bool:
+        """True if `secret` matches the stored hash for this device_id."""
+        device = await self.get_by_device_id(device_id)
+        if device is None:
+            return False
+        return verify_device_secret(secret, device.device_secret_hash)
+
+    async def activate_with_secret(self, device_id: str, secret: str) -> Device:
+        """Activate a pending device by presenting its registration secret.
+        Wrong/missing secret → 403. Idempotent for already-active devices."""
+        device = await self.get_by_device_id(device_id)
+        if device is None:
+            raise not_found("Device")
+        if not verify_device_secret(secret, device.device_secret_hash):
+            raise forbidden("Invalid device secret")
+        device.status = "active"
         await self.db.flush()
         return device
 

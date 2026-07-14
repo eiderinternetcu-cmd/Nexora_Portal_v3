@@ -9,7 +9,13 @@ from app.core.dependencies import get_current_subscriber
 from app.core.exceptions import not_found, forbidden
 from app.models.subscriber import Subscriber
 from app.schemas.client import ClientProfileResponse, ClientDeviceRegister, ClientHeartbeatRequest
-from app.schemas.device import DeviceOut, DeviceRegister, DeviceHeartbeat
+from app.schemas.device import (
+    DeviceOut,
+    DeviceRegister,
+    DeviceHeartbeat,
+    DeviceRegisterResponse,
+    DeviceActivateRequest,
+)
 from app.services.stb_service import STBService
 from app.services.device_service import DeviceService
 
@@ -55,7 +61,7 @@ async def list_devices(
     return await svc.list_for_subscriber(subscriber.id)
 
 
-@router.post("/devices/register", response_model=DeviceOut)
+@router.post("/devices/register", response_model=DeviceRegisterResponse)
 async def register_device(
     data: ClientDeviceRegister,
     request: Request,
@@ -77,6 +83,29 @@ async def register_device(
         ),
         _get_ip(request),
     )
+    await db.commit()
+    resp = DeviceRegisterResponse.model_validate(device)
+    # Surface the plaintext secret ONCE, only when a fresh one was just issued.
+    resp.device_secret = getattr(device, "plaintext_secret", None)
+    return resp
+
+
+@router.post("/devices/activate", response_model=DeviceOut)
+async def activate_device(
+    data: DeviceActivateRequest,
+    subscriber: Subscriber = Depends(get_current_subscriber),
+    db: AsyncSession = Depends(get_db),
+    redis: aioredis.Redis = Depends(get_redis),
+):
+    """Activate a pending device by presenting its registration secret.
+    No-op for already-active devices; wrong secret → 403."""
+    svc = DeviceService(db, redis)
+    device = await svc.get_by_device_id(data.device_id)
+    if device is None:
+        raise not_found("Device")
+    if device.subscriber_id != subscriber.id:
+        raise forbidden("Device does not belong to this subscriber")
+    device = await svc.activate_with_secret(data.device_id, data.device_secret)
     await db.commit()
     return device
 

@@ -3,6 +3,8 @@ Security — JWT con PyJWT + Argon2id via passlib.
 Reemplaza python-jose (incompatible con Python 3.14 sin compilador Rust).
 """
 import hashlib
+import hmac
+import secrets
 import uuid
 from datetime import datetime, timezone, timedelta
 
@@ -39,6 +41,25 @@ def hash_password(password: str) -> str:
 
 def verify_password(plain: str, hashed: str) -> bool:
     return pwd_context.verify(plain, hashed)
+
+
+# ── Device secret (M1 — strong device identity) ─────────────────────────────
+# A device secret is high-entropy random, so a keyed HMAC-SHA256 is sufficient
+# (argon2 is for low-entropy human passwords). Returned to the client ONCE at
+# registration; only its hash is stored.
+def generate_device_secret() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def hash_device_secret(secret: str) -> str:
+    return hmac.new(settings.secret_key.encode(), secret.encode(), hashlib.sha256).hexdigest()
+
+
+def verify_device_secret(secret: str | None, hashed: str | None) -> bool:
+    """Constant-time verification. False if either side is missing."""
+    if not secret or not hashed:
+        return False
+    return hmac.compare_digest(hash_device_secret(secret), hashed)
 
 
 # ── JWT identity constants ──────────────────────────────────────────────────
