@@ -1,6 +1,6 @@
 # ROADMAP — Nexora API (lo que está PENDIENTE)
 
-_Actualizado: 2026-07-14_
+_Actualizado: 2026-07-14 (M1 code-complete: PR #11)_
 
 > Este documento lista **solo lo que falta**. Lo ya entregado está en `PROJECT_STATUS.md`.
 > Ordenado por dependencias reales, no por deseo. Alineado con `docs/nexora-best-of/12_ROADMAP_PRIORIZADO.md`
@@ -19,8 +19,13 @@ _Actualizado: 2026-07-14_
 | **PROD-2A** `ENTITLEMENT_ENFORCE=true` (anti-IDOR por plan) | ✅ |
 | **PROD-2B** `JWT_REQUIRE_AUD=true` (iss/aud/type estrictos) | ✅ |
 | **PROD-2C** `SIGNED_URL_ENFORCE=true` + Nginx `auth_request` + grant Redis de segmentos | ✅ validado (13 min, 396/396 req, 0 fallos) |
+| **Argon2id** para hashing de passwords | ✅ ya implementado (`app/core/security.py`) |
+| **M1 device secret** (identidad fuerte, flag-gated) + **grant hardening** | ✅ código en PR #11, CI verde, Alembic **006** (no mergeado) |
 
-**Hito M1 (playback seguro) está ~80% cerrado.** Lo que falta de M1 abre la sección P0.
+**Hito M1 (playback seguro) está cerrado en código.** Lo único que falta para dar M1 por
+completo es **activar 2D (`PLAYBACK_IP_BINDING_MODE=soft`) en producción** (P0.1) — un flip de
+flag con autorización. El resto de M1 (entitlement, gate, signed-url, Argon2id, device secret,
+grant hardening) ya está entregado.
 
 ---
 
@@ -32,7 +37,7 @@ _Actualizado: 2026-07-14_
 
 ## 🔴 P0 — Cerrar M1 (playback seguro) y limpiar deuda inmediata
 
-### P0.1 · PROD-Fase 2D: IP-binding del playback token
+### P0.1 · PROD-Fase 2D: IP-binding del playback token — **ÚNICO ítem vivo de M1**
 El token ya lleva el claim `cip` (hash de IP) y el gate Nginx ya pasa `X-Real-IP` real al backend.
 Solo falta **activar el enforcement**, escalonado:
 - `PLAYBACK_IP_BINDING_MODE=soft` → warn + permite. Observar mismatches varios días (clientes móviles cambian de IP).
@@ -40,18 +45,17 @@ Solo falta **activar el enforcement**, escalonado:
 - **Requiere autorización explícita por flag.** Rollback: quitar la línea de `.env.production` + recrear api.
 - _Referencia:_ `deploy/RUNBOOK_PRODUCTION_P0.md` · **AC:** misma IP → 200; otra IP → 200+WARN (soft) / 403 (strict).
 
-### P0.2 · Hardening del grant de segmentos (residual de 2C)
-Dos comportamientos detectados en la validación de continuidad, **ninguno rompe hoy**, pero debilitan el modelo:
-1. **Latencia de revocación:** el grant (`nexora:stream_grant:{node}:{stream}:{ip_hash}`) se **auto-renueva** en cada request, así que un stream en curso queda **desacoplado del ciclo de sesión/heartbeat**. Revocar un suscriptor **no corta** su stream mientras siga pidiendo segmentos (se corta en cambio de canal, gap >180 s, o al fallar una renovación con token).
-   → **Opciones:** vida máxima absoluta del grant (independiente de la renovación), y/o re-validar la sesión periódicamente dentro del grant.
-2. **Token expirado = 401 duro:** el gate, ante un token *presente pero expirado*, hace 401 en vez de caer al grant. Hoy la renovación del player lo evita, pero es frágil ante fallos de renovación.
-   → **Opción:** fallback al grant cuando el token esté expirado pero el grant sea válido.
-- **Es cambio de código + tests** (`app/api/internal/stream_auth.py`, `app/services/stream_auth_service.py`).
+### P0.2 · Hardening del grant de segmentos — ✅ HECHO (PR #11, código; falta activar en prod)
+Resuelto en código (flag-gated, defaults que no cambian prod):
+1. **Latencia de revocación** → **`STREAM_GRANT_MAX_LIFETIME_SECONDS`** (default 0 = ilimitado/legacy): el grant guarda su seed epoch y muere al alcanzar el tope absoluto, sin importar la renovación. _Pendiente: definir el valor de prod (p. ej. 6 h) y activarlo._
+2. **Token expirado = 401 duro** → **`STREAM_GRANT_TOKEN_FALLBACK`** (default on): un token presente-pero-expirado cae a un grant válido del mismo node+stream+IP (continuidad). Ya activo por defecto.
+- Implementado en `app/services/stream_auth_service.py` + `app/api/internal/stream_auth.py`; 11 tests nuevos.
 
-### P0.3 · Deuda de versionado
-- **Mergear PR #9** (`infra: version production auth_request gate`) — versiona el `nexoraplay.conf` real de prod + el runbook. Hoy el fix que corre en producción **solo está en el servidor y en ramas locales**.
-- **Pushear** el commit de housekeeping `f577b51` (`.dockerignore` versionado, docs de diseño, `.gitignore` endurecido).
-- Tras mergear: consolidar los `.md` de raíz en `docs/` (requiere actualizar las rutas que lee `mcp_server/server.py`).
+### P0.3 · Deuda de versionado — PRs abiertos (falta mergear)
+- **PR #9** `infra: version production auth_request gate` — versiona el `nexoraplay.conf` real de prod + runbook. Abierto, `MERGEABLE`.
+- **PR #10** `chore: repo housekeeping + pending-work roadmap` — `.dockerignore` versionado, docs de diseño, `.gitignore` endurecido, este ROADMAP. Abierto.
+- **PR #11** `feat(m1): device secret + grant hardening` — código de M1, CI verde, Alembic 006. Abierto.
+- Orden sugerido de merge: **#9 → #10 → #11** (sin conflictos entre sí). Tras mergear: consolidar los `.md` de raíz en `docs/` (actualizar las rutas que lee `mcp_server/server.py`).
 
 ### P0.4 · co-main caído (externo)
 El nodo Flussonic `co-main` (38.210.187.13) está **caído** → 4 canales sin servicio. Es una fuente externa.
@@ -102,8 +106,8 @@ Hoy `get_flussonic_node_client()` es un stub y el `.env` lista los nodos a mano.
 
 | ID | Pendiente | AC |
 |---|---|---|
-| `NX-DEV` | **Identidad fuerte de device**: `device_secret`/cert, handshake HMAC, device nuevo = `pending` (hoy el login **auto-registra** en silencio), rate-limit de re-binding | Device sin secret válido no obtiene token; MAC sola es insuficiente |
-| `NX-AUTH` | Verificar/forzar **Argon2id**, lockout por N fallos, **auditoría de login admin**, (MFA opcional) | Credenciales malas → 401; login admin auditado |
+| `NX-DEV` | ✅ **base hecha en PR #11** (flag `DEVICE_SECRET_ENFORCE`): secreto por device + `status` pending/active, activación con secreto. _Falta para activarlo:_ que el web player/STB guarden y presenten el secreto (otro repo) + rate-limit de re-binding + handshake HMAC opcional | Device sin secret válido no obtiene token; MAC sola es insuficiente |
+| `NX-AUTH` | **Argon2id ya ✅**; falta lockout por N fallos, **auditoría de login admin**, (MFA opcional) | Credenciales malas → 401; login admin auditado |
 | `NX-AUDIT` | `audit_log` **inmutable/append-only** + particionado + retención | Consulta filtrable; no se puede alterar |
 | `NX-PARENTAL` | Control parental **PIN server-side** (`channels.censored`) | Canal adulto sin PIN → 403 |
 
@@ -152,9 +156,9 @@ P1.3 STAGING real ────────┤              (desbloquea probar fl
 
 | Riesgo | Estado / mitigación |
 |---|---|
-| Revocación no corta streams en curso (grant auto-renovable) | **Abierto** → P0.2 |
+| Revocación no corta streams en curso (grant auto-renovable) | **Resuelto en código** (PR #11, `STREAM_GRANT_MAX_LIFETIME_SECONDS`); falta definir/activar el tope en prod |
 | `strict` IP-binding rompe clientes móviles | Mitigado: escalonar `off → soft → strict` con observación (P0.1) |
-| El fix real de Nginx solo vive en el servidor | **Abierto** → mergear PR #9 (P0.3) |
+| El fix real de Nginx solo vive en el servidor | Mitigado: en **PR #9** (abierto); riesgo se cierra al mergear |
 | No hay staging → los flags se prueban en producción | **Abierto** → P1.3 |
 | Fuentes IPTV externas caídas (co-main) | Conocido → alertas + failover (P0.4 / P2.2) |
 | Carrera en el ZSET puede exceder `max_connections` | **Abierto** → P1.2 (Lua) |
