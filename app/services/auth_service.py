@@ -24,6 +24,7 @@ from app.core.security import (
 from app.core.exceptions import unauthorized, locked
 from app.redis_client import key_login_attempts, key_lockout
 from app.services.session_service import SessionService
+from app.services.audit_service import AuditService
 from app.schemas.auth import TokenResponse
 
 settings = get_settings()
@@ -86,6 +87,10 @@ class AuthService:
             update(User)
             .where(User.id == user.id)
             .values(last_login_at=datetime.now(timezone.utc), last_login_ip=ip)
+        )
+        # Immutable audit trail of admin/reseller logins (M2).
+        await AuditService(self.db).log(
+            action="auth.login", actor=user, ip_address=ip, details={"role": role}
         )
         await self.db.commit()
 

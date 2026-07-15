@@ -22,6 +22,7 @@ from app.integrations.flussonic_client import get_flussonic_client
 from app.services.metrics_service import MetricsService
 from app.services.alert_service import AlertService
 from app.services.node_health import check_all_nodes
+from app.services.audit_service import AuditService
 
 router = APIRouter(tags=["Admin Metrics"])
 _flussonic = get_flussonic_client()
@@ -113,3 +114,30 @@ async def get_active_alerts(
     """Active operational alerts (e.g. Flussonic node down). Opened by the
     background stream-health monitor; cleared automatically on recovery."""
     return {"active": await AlertService(redis).active_alerts()}
+
+
+@router.get("/audit")
+async def get_audit_log(
+    action: str | None = None,
+    actor: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_admin_or_reseller),
+):
+    """Append-only admin audit trail (most recent first), filterable by action
+    and actor username."""
+    rows = await AuditService(db).list(action=action, actor_username=actor, limit=limit, offset=offset)
+    return [
+        {
+            "id": str(r.id),
+            "actor_username": r.actor_username,
+            "action": r.action,
+            "target_type": r.target_type,
+            "target_id": r.target_id,
+            "details": r.details,
+            "ip_address": r.ip_address,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r in rows
+    ]

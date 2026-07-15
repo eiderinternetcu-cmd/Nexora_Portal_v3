@@ -19,9 +19,11 @@ from app.api.subscriber.router import router as subscriber_router
 from app.api.client.router import router as client_router
 from app.api.internal.stream_auth import router as internal_stream_auth_router
 from app.middleware.rate_limit import RateLimitMiddleware
+from app.middleware.correlation import CorrelationIdMiddleware, configure_correlation_logging
 from app.core.exceptions import NexoraException
 
 settings = get_settings()
+configure_correlation_logging()
 
 _CLEANUP_INTERVAL_SECONDS = 900  # 15 minutes
 _STREAM_MONITOR_INTERVAL_SECONDS = 120  # 2 minutes
@@ -122,6 +124,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.add_middleware(RateLimitMiddleware)
+app.add_middleware(CorrelationIdMiddleware)
 
 # ── Exception handlers ────────────────────────────────────────────────────────
 
