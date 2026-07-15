@@ -80,6 +80,14 @@ class Settings(BaseSettings):
     flussonic_ec_quito_user: str = ""
     flussonic_ec_quito_password: str = ""
 
+    # Management API base URLs (health/list). In prod the *_base_url above are the
+    # same-origin /stream/* paths (gated by auth_request), which the management API
+    # can't be reached through — set these to the REAL Flussonic origin so node
+    # health/alerting is accurate. Empty → fall back to the same-origin base.
+    flussonic_mgmt_base_url: str = ""
+    flussonic_co_main_mgmt_base_url: str = ""
+    flussonic_ec_quito_mgmt_base_url: str = ""
+
     @property
     def database_url(self) -> str:
         """Async URL for SQLAlchemy create_async_engine (psycopg3)."""
