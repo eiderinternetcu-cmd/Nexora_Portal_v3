@@ -19,6 +19,9 @@ from app.core.dependencies import require_admin_or_reseller
 from app.models.user import User
 from app.models.session import Session
 from app.integrations.flussonic_client import get_flussonic_client
+from app.services.metrics_service import MetricsService
+from app.services.alert_service import AlertService
+from app.services.node_health import check_all_nodes
 
 router = APIRouter(tags=["Admin Metrics"])
 _flussonic = get_flussonic_client()
@@ -32,6 +35,7 @@ class SystemMetrics(BaseModel):
     postgres_healthy: bool
     flussonic_configured: bool
     flussonic_reachable: bool | None  # None = not checked (not configured)
+    playback: dict  # cumulative authorize counters (total/success/failure/rate/by_reason)
 
 
 class NodeHealth(BaseModel):
@@ -78,6 +82,8 @@ async def get_system_metrics(
     if _flussonic.is_configured:
         flussonic_reachable = await _flussonic.check_connectivity()
 
+    playback = await MetricsService(redis).playback_snapshot()
+
     return SystemMetrics(
         timestamp=now.isoformat(),
         active_iptv_sessions=active_sessions,
@@ -86,6 +92,7 @@ async def get_system_metrics(
         postgres_healthy=True,  # DB query above succeeded; 500 fires on failure
         flussonic_configured=_flussonic.is_configured,
         flussonic_reachable=flussonic_reachable,
+        playback=playback,
     )
 
 
@@ -93,42 +100,16 @@ async def get_system_metrics(
 async def get_nodes_health(
     _: User = Depends(require_admin_or_reseller),
 ):
-    """Per-node Flussonic health check.
+    """Per-node Flussonic health for EVERY configured node (ec-main, co-main,
+    ec-quito), so a down secondary node is visible — not just the primary."""
+    return [NodeHealth(**n) for n in await check_all_nodes()]
 
-    Returns one entry per configured node. Phase 4.4 will extend this to
-    the full multi-node registry. For now: single primary node (ec-main).
-    """
-    from app.config import get_settings
-    s = get_settings()
 
-    nodes: list[NodeHealth] = []
-
-    if s.flussonic_base_url:
-        parsed = urlparse(s.flussonic_base_url)
-        reachable = False
-        latency_ms: float | None = None
-        stream_count: int | None = None
-
-        if _flussonic.is_configured:
-            t0 = time.monotonic()
-            reachable = await _flussonic.check_connectivity()
-            latency_ms = round((time.monotonic() - t0) * 1000, 2)
-
-            if reachable:
-                try:
-                    streams = await _flussonic.list_streams()
-                    stream_count = len(streams)
-                except Exception:
-                    pass
-
-        nodes.append(NodeHealth(
-            node_id="ec-main",
-            host=parsed.netloc,
-            region="EC",
-            configured=_flussonic.is_configured,
-            reachable=reachable,
-            latency_ms=latency_ms,
-            stream_count=stream_count,
-        ))
-
-    return nodes
+@router.get("/alerts")
+async def get_active_alerts(
+    redis: aioredis.Redis = Depends(get_redis),
+    _: User = Depends(require_admin_or_reseller),
+):
+    """Active operational alerts (e.g. Flussonic node down). Opened by the
+    background stream-health monitor; cleared automatically on recovery."""
+    return {"active": await AlertService(redis).active_alerts()}

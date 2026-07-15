@@ -24,6 +24,7 @@ from app.core.exceptions import NexoraException
 settings = get_settings()
 
 _CLEANUP_INTERVAL_SECONDS = 900  # 15 minutes
+_STREAM_MONITOR_INTERVAL_SECONDS = 120  # 2 minutes
 
 
 async def _cleanup_expired_sessions() -> None:
@@ -54,6 +55,25 @@ async def _cleanup_expired_sessions() -> None:
         await asyncio.sleep(_CLEANUP_INTERVAL_SECONDS)
 
 
+async def _stream_health_monitor() -> None:
+    """Background task (M2): poll every configured Flussonic node and open/resolve
+    alerts when a node goes down/recovers. Runs every 2 min; first run delayed."""
+    from app.services.node_health import check_all_nodes
+    from app.services.alert_service import AlertService
+
+    await asyncio.sleep(90)  # warmup
+    while True:
+        try:
+            redis = await get_redis()
+            alerts = AlertService(redis)
+            for n in await check_all_nodes():
+                detail = None if n["reachable"] else f"host={n['host']} configured={n['configured']}"
+                await alerts.record_node_health(n["node_id"], n["reachable"], detail)
+        except Exception as exc:
+            print(f"[nexora-api] Stream health monitor error: {exc}")
+        await asyncio.sleep(_STREAM_MONITOR_INTERVAL_SECONDS)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
@@ -61,11 +81,13 @@ async def lifespan(app: FastAPI):
     await redis.ping()
     print("[nexora-api] Redis connected")
     cleanup_task = asyncio.create_task(_cleanup_expired_sessions())
+    monitor_task = asyncio.create_task(_stream_health_monitor())
     yield
     # Shutdown
-    cleanup_task.cancel()
-    with contextlib.suppress(asyncio.CancelledError):
-        await cleanup_task
+    for t in (cleanup_task, monitor_task):
+        t.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await t
     await close_redis()
     await engine.dispose()
     print("[nexora-api] Shutdown complete")
