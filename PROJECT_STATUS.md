@@ -1,5 +1,28 @@
 # PROJECT_STATUS.md — Nexora API
-_Last updated: 2026-05-18_
+_Last updated: 2026-07-15_
+
+> 📍 Estado y trabajo pendiente completos en [`docs/ROADMAP.md`](docs/ROADMAP.md). Runbook de prod en [`deploy/RUNBOOK_PRODUCTION_P0.md`](deploy/RUNBOOK_PRODUCTION_P0.md). Lo de abajo es histórico (Fases 1–4).
+
+## ESTADO ACTUAL — 2026-07-15
+
+**Producción `nexoraplay.net` (45.184.225.4) · Alembic 007 · stack `docker-compose.production.yml`.**
+
+Desplegado y operativo en prod:
+- **P0 seguridad**: `ENTITLEMENT_ENFORCE`, `JWT_REQUIRE_AUD`, `SIGNED_URL_ENFORCE` = ON; Nginx `auth_request` gate en `/stream/*` + grant Redis de segmentos.
+- **M1 playback seguro**: Argon2id, device-secret (flag `DEVICE_SECRET_ENFORCE` off), grant hardening (`STREAM_GRANT_MAX_LIFETIME_SECONDS`=0, `STREAM_GRANT_TOKEN_FALLBACK`=on), concurrencia atómica de conexiones (Lua). Migración **006**.
+- **M2 operación observable**: métricas de playback en `/admin/metrics` (success/failure por reason), auditoría admin **inmutable** (`/admin/audit`, trigger append-only), correlation-id (`X-Request-ID`), `/admin/nodes/health` (multinodo) + `/admin/alerts`. Migración **007**.
+
+Flags **OFF** (activación posterior con ventana): `PLAYBACK_IP_BINDING_MODE` (2D), `DEVICE_SECRET_ENFORCE`, tope de grant.
+
+Pendiente inmediato (P0): activar **2D** (IP-binding); resolver **alerting de nodos** (el backend no alcanza Flussonic directo — solo el edge; recomendado probe HLS firmado vía nginx — ver `docs/ROADMAP.md` P0.5).
+
+Endpoints admin nuevos: `GET /api/admin/metrics` (con `.playback`), `/api/admin/nodes/health`, `/api/admin/alerts`, `/api/admin/audit`.
+
+Migraciones: 001→**007** (005 plan_channels · 006 device secret/status · 007 audit_logs append-only).
+
+---
+
+## HISTÓRICO (Fases 1–4)
 
 ---
 
