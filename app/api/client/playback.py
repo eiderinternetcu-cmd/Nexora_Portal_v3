@@ -13,9 +13,11 @@ from app.config import get_settings
 from app.database import get_db
 from app.redis_client import get_redis
 from app.core.dependencies import get_current_subscriber
+from app.core.exceptions import NexoraException
 from app.models.subscriber import Subscriber
 from app.schemas.client import PlaybackAuthorizeRequest, PlaybackResponse
 from app.services.stream_auth_service import StreamAuthService
+from app.services.metrics_service import MetricsService
 from app.services.channel_service import ChannelService
 from app.integrations.flussonic_client import get_flussonic_node_client
 from app.models.channel import Channel
@@ -95,15 +97,21 @@ async def authorize_playback(
     node = ch.flussonic_node if ch is not None else None
 
     svc = StreamAuthService(db, redis)
-    result = await svc.authorize(
-        subscriber_id=subscriber.id,
-        device_id_str=data.device_id,
-        channel_id=stream_key,
-        ip=_get_ip(request),
-        user_agent=request.headers.get("User-Agent"),
-        channel_key=data.channel_id,  # public key → EntitlementService
-        node=node,
-    )
+    metrics = MetricsService(redis)
+    try:
+        result = await svc.authorize(
+            subscriber_id=subscriber.id,
+            device_id_str=data.device_id,
+            channel_id=stream_key,
+            ip=_get_ip(request),
+            user_agent=request.headers.get("User-Agent"),
+            channel_key=data.channel_id,  # public key → EntitlementService
+            node=node,
+        )
+    except NexoraException as exc:
+        await metrics.record_playback_failure(exc.detail)
+        raise
+    await metrics.record_playback_success()
     await db.commit()
 
     base_url = _resolve_playback_url(ch, stream_key)
