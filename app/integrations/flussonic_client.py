@@ -69,8 +69,14 @@ class FlussonicClient(_WriteBlocker):
     Never instantiate directly with hardcoded credentials.
     """
 
-    def __init__(self, base_url: str, user: str, password: str) -> None:
+    def __init__(self, base_url: str, user: str, password: str,
+                 mgmt_base_url: str | None = None) -> None:
+        # `_base` builds public playback URLs (may be a same-origin /stream/* path
+        # that is gated by auth_request). `_mgmt` is the Flussonic management API
+        # host used for health/list calls — it must be the real origin, not the
+        # gated path. Defaults to _base when no separate mgmt URL is configured.
         self._base = base_url.rstrip("/")
+        self._mgmt = (mgmt_base_url or base_url).rstrip("/")
         # Auth tuple is private — never returned to callers or logged.
         self.__auth = (user, password)
 
@@ -110,7 +116,7 @@ class FlussonicClient(_WriteBlocker):
         Returns raw dicts — caller should not pass these to the frontend.
         """
         async with self._client() as client:
-            resp = await client.get(f"{self._base}{_API_PREFIX}/streams")
+            resp = await client.get(f"{self._mgmt}{_API_PREFIX}/streams")
             resp.raise_for_status()
             data = resp.json()
             # Flussonic wraps the list in {"streams": [...]}
@@ -122,7 +128,7 @@ class FlussonicClient(_WriteBlocker):
         Returns None if the stream does not exist.
         """
         async with self._client() as client:
-            resp = await client.get(f"{self._base}{_API_PREFIX}/streams/{name}")
+            resp = await client.get(f"{self._mgmt}{_API_PREFIX}/streams/{name}")
             if resp.status_code == 404:
                 return None
             resp.raise_for_status()
@@ -161,7 +167,7 @@ class FlussonicClient(_WriteBlocker):
         try:
             async with self._client() as client:
                 resp = await client.get(
-                    f"{self._base}{_API_PREFIX}/streams",
+                    f"{self._mgmt}{_API_PREFIX}/streams",
                     params={"limit": "1"},
                 )
                 return resp.is_success
@@ -184,6 +190,7 @@ def get_flussonic_client() -> FlussonicClient:
             base_url=s.flussonic_base_url,
             user=s.flussonic_readonly_user,
             password=s.flussonic_readonly_password,
+            mgmt_base_url=s.flussonic_mgmt_base_url,
         )
     return _client_instance
 
@@ -212,18 +219,21 @@ def get_flussonic_node_client(node_id: str) -> FlussonicClient | None:
             base_url=s.flussonic_base_url,
             user=s.flussonic_readonly_user,
             password=s.flussonic_readonly_password,
+            mgmt_base_url=s.flussonic_mgmt_base_url,
         )
     elif node_id == "co-main":
         client = FlussonicClient(
             base_url=s.flussonic_co_main_base_url,
             user=s.flussonic_co_main_user,
             password=s.flussonic_co_main_password,
+            mgmt_base_url=s.flussonic_co_main_mgmt_base_url,
         )
     elif node_id == "ec-quito":
         client = FlussonicClient(
             base_url=s.flussonic_ec_quito_base_url,
             user=s.flussonic_ec_quito_user,
             password=s.flussonic_ec_quito_password,
+            mgmt_base_url=s.flussonic_ec_quito_mgmt_base_url,
         )
     else:
         logger.warning("Unknown Flussonic node_id: %s", node_id)
