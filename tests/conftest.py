@@ -6,13 +6,26 @@ If TEST_DATABASE_URL is not set, tests that need the DB are skipped.
 
 Requires: pytest, pytest-asyncio  (add to requirements-dev.txt).
 """
+import asyncio
 import os
+import sys
 import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+# psycopg no funciona sobre el ProactorEventLoop, que es el default de asyncio en
+# Windows. Hasta ahora la politica selector solo se fijaba como EFECTO COLATERAL de
+# importar scripts/*.py desde tests/test_audit_source_urls.py, asi que el resultado
+# dependia del orden de coleccion: segun que fichero se recogiera primero, la suite
+# pasaba entera o ~40% de los tests de BD reventaban con
+# `InterfaceError: Psycopg cannot use the 'ProactorEventLoop'`.
+# Fijarla aqui hace el comportamiento determinista y permite ejecutar cualquier
+# fichero de test por separado.
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 from app.database import Base
 import app.models  # noqa: F401  ensure all models are registered on Base.metadata
