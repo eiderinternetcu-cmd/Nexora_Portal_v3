@@ -3,6 +3,24 @@ import Hls, { type ErrorData } from "hls.js";
 const MAX_NETWORK_RETRIES = 3;
 const RETRY_DELAYS_MS = [1_000, 2_000, 4_000];
 
+/**
+ * Ventana de guarda para reintentar `recoverMediaError()`.
+ *
+ * La documentación oficial de hls.js (docs/API.md, "fatal media error
+ * recovery") NO limita la recuperación a un solo intento: la temporiza. Si
+ * vuelve a fallar DENTRO de esta ventana, la recuperación no está funcionando y
+ * el error es realmente fatal; si falla DESPUÉS, es un incidente nuevo y toca
+ * volver a intentarlo.
+ *
+ * Importa porque `bufferAppendError` es un fallo recurrente conocido en
+ * directo (video-dev/hls.js#7321): el SourceBuffer sigue procesando un
+ * `appendBuffer` anterior, y se agrava con `lowLatencyMode` en redes rápidas.
+ * En algunos canales reaparece a los pocos segundos, así que un único intento
+ * de recuperación se agota de inmediato y el usuario ve un error fatal en un
+ * stream que sí se puede recuperar.
+ */
+const MEDIA_RECOVERY_WINDOW_MS = 5_000;
+
 export type HlsCallbacks = {
   /** Called when all recovery attempts have been exhausted. */
   onFatalError?: (message: string) => void;
@@ -14,7 +32,8 @@ export type HlsCallbacks = {
 
 export class HlsController {
   private hls: Hls | null = null;
-  private mediaRecoveryAttempted = false;
+  /** Instante del último `recoverMediaError()`, o null si no se ha intentado. */
+  private lastMediaRecoveryAt: number | null = null;
   private networkRetryCount = 0;
   private networkRetryTimer = 0;
 
@@ -76,7 +95,7 @@ export class HlsController {
   }
 
   private _resetRecovery() {
-    this.mediaRecoveryAttempted = false;
+    this.lastMediaRecoveryAt = null;
     this.networkRetryCount = 0;
     this._clearNetworkRetryTimer();
   }
@@ -92,14 +111,23 @@ export class HlsController {
     if (!data.fatal) return; // non-fatal: hls.js handles internally via its own retry logic
 
     if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-      if (!this.mediaRecoveryAttempted) {
-        // First media error: attempt graceful codec recovery
-        this.mediaRecoveryAttempted = true;
+      const now = Date.now();
+      const sinceLast =
+        this.lastMediaRecoveryAt === null
+          ? Infinity
+          : now - this.lastMediaRecoveryAt;
+
+      // Patrón oficial (hls.js docs/API.md): la recuperación se temporiza, no
+      // se limita a un único intento. Fuera de la ventana de guarda es un
+      // incidente nuevo y se vuelve a recuperar.
+      if (sinceLast > MEDIA_RECOVERY_WINDOW_MS) {
+        this.lastMediaRecoveryAt = now;
         this.callbacks.onRetrying?.(1, 1);
         this.hls?.recoverMediaError();
         return;
       }
-      // Second media error after recovery attempt → truly fatal
+
+      // Reaparece DENTRO de la ventana ⇒ la recuperación no está funcionando.
       this.callbacks.onFatalError?.(
         "Error de decodificación de video. Intenta cambiar de canal.",
       );
