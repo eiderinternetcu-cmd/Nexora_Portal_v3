@@ -23,6 +23,13 @@ class ClientTokenResponse(BaseModel):
     subscriber_id: str
     # 'registered' | 'limit_reached' — login never fails on device cap (P0-003)
     device_registration: str | None = None
+    # NX-DEV: plaintext device secret, delivered EXACTLY ONCE — on the login that
+    # actually creates the device row. Always None on refresh, on any later login
+    # with the same device_id (the plaintext no longer exists anywhere), and when
+    # device_registration == 'limit_reached' (no device was created). Clients must
+    # persist it at first login; it is the credential for POST
+    # /profile/devices/activate and cannot be re-issued.
+    device_secret: str | None = None
 
 
 class ClientRefreshRequest(BaseModel):

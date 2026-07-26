@@ -83,12 +83,23 @@ class DeviceService:
         - New device over the plan limit:
             raise_on_limit=True  → HTTP 409 DEVICE_LIMIT_REACHED  (explicit /devices/register)
             raise_on_limit=False → returns None, creates nothing   (login path: never blocks)
+
+        NX-DEV secret contract: `plaintext_secret` is attached to the returned
+        Device ONLY when this call created the row. It is never set on the
+        existing-device branch — the plaintext is not stored anywhere and cannot
+        be recovered. Callers must surface it exactly once (login response /
+        register response) and never log it.
         """
         # Check existing
         existing = await self.get_by_device_id(data.device_id)
         if existing:
             if existing.subscriber_id != subscriber_id:
                 raise forbidden("Device registered to a different subscriber")
+            # Defensive: if this instance is still in the session identity map
+            # from an earlier create in the same session, drop the stale
+            # plaintext so a re-register can never re-emit it.
+            if hasattr(existing, "plaintext_secret"):
+                del existing.plaintext_secret
             # Update info on re-register
             existing.model = data.model or existing.model
             existing.brand = data.brand or existing.brand

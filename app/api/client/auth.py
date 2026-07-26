@@ -33,18 +33,21 @@ async def client_login(
     redis: aioredis.Redis = Depends(get_redis),
 ):
     svc = ClientAuthService(db, redis)
-    access_token, refresh_token, subscriber_id, expires_in, device_registration = await svc.login(
+    result = await svc.login(
         data=data,
         ip=_get_ip(request),
         user_agent=request.headers.get("User-Agent"),
     )
     await db.commit()
     return ClientTokenResponse(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        expires_in=expires_in,
-        subscriber_id=subscriber_id,
-        device_registration=device_registration,
+        access_token=result.access_token,
+        refresh_token=result.refresh_token,
+        expires_in=result.expires_in,
+        subscriber_id=result.subscriber_id,
+        device_registration=result.device_registration,
+        # NX-DEV: set only when THIS login created the device row. The client
+        # must persist it — it is never re-issued (see ClientTokenResponse).
+        device_secret=result.device_secret,
     )
 
 

@@ -127,6 +127,7 @@ async def authorize_playback(
 @router.get("/{channel_id}", response_model=PlaybackResponse)
 async def reissue_playback_token(
     channel_id: str,
+    request: Request,
     device_id: str = Query(..., min_length=6, max_length=128),
     subscriber: Subscriber = Depends(get_current_subscriber),
     db: AsyncSession = Depends(get_db),
@@ -137,21 +138,30 @@ async def reissue_playback_token(
     Lighter than /authorize — skips subscription/plan reload.
     Call /authorize first if no active session exists.
 
-    Response contains the same safe fields as /authorize.
+    Response contains the same safe fields as /authorize. The token carries the
+    same bindings as /authorize (chn/sk/node/cip) and the playback_url is signed
+    under SIGNED_URL_ENFORCE exactly like /authorize — a reissued token must not
+    be weaker than the one it replaces (a player renews every ~45s, so most
+    tokens in flight are reissues).
     """
     ch = await ChannelService(db).get_active_by_key(channel_id)
+    node = ch.flussonic_node
 
     svc = StreamAuthService(db, redis)
     result = await svc.create_token(
         subscriber_id=subscriber.id,
         device_id_str=device_id,
         channel_id=ch.stream_key,
+        channel_key=channel_id,   # public key → 'chn' claim (+ optional entitlement recheck)
+        node=node,
+        ip=_get_ip(request),
     )
 
+    base_url = _resolve_playback_url(ch, ch.stream_key)
     return PlaybackResponse(
         token=result.token,
         expires_in=result.expires_in,
         channel_id=channel_id,
         subscriber_id=str(result.subscriber_id),
-        playback_url=_resolve_playback_url(ch, ch.stream_key),
+        playback_url=_maybe_sign(base_url, result.token),
     )

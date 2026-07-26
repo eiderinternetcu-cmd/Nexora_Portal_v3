@@ -25,8 +25,15 @@ async def list_channels(
     subscriber: Subscriber = Depends(get_current_subscriber),
     db: AsyncSession = Depends(get_db),
 ):
+    """"My channels" — the catalog this subscriber can actually play.
+
+    Gated by CATALOG_ENTITLEMENT_FILTER (default OFF → full active catalog,
+    i.e. the historical behaviour). See ChannelService for the plan-resolution
+    rules and for why a subscriber with no plan in force still gets the full
+    catalog instead of an empty list.
+    """
     svc = ChannelService(db)
-    return await svc.list_active()
+    return await svc.list_visible_for_subscriber(subscriber.id)
 
 
 @router.get("/channels/{channel_key}/epg", response_model=list[EpgEntry])

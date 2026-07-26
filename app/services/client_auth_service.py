@@ -2,6 +2,9 @@
 ClientAuthService — subscriber-facing authentication for modern client apps.
 Handles login with device auto-registration, JWT rotation, and logout.
 """
+from dataclasses import dataclass
+from typing import Iterator
+
 from sqlalchemy.ext.asyncio import AsyncSession
 import redis.asyncio as aioredis
 from jwt.exceptions import InvalidTokenError
@@ -24,6 +27,49 @@ from app.services.stb_service import STBService
 from app.services.device_service import DeviceService
 
 settings = get_settings()
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class ClientLoginResult:
+    """Result of ClientAuthService.login().
+
+    Backwards compatible on purpose: iterating/unpacking yields exactly the
+    historic 5-tuple ``(access_token, refresh_token, subscriber_id, expires_in,
+    device_registration)``, so existing callers keep working unchanged. The new
+    ``device_secret`` is available by attribute only.
+    """
+
+    access_token: str
+    refresh_token: str
+    subscriber_id: str
+    expires_in: int
+    device_registration: str
+    # Plaintext device secret — set ONLY on the login that created the device row.
+    # None on every subsequent login, and when the device cap was hit.
+    device_secret: str | None = None
+
+    def __iter__(self) -> Iterator:
+        # Legacy 5-value unpacking contract — device_secret is deliberately NOT
+        # part of it, so no existing caller starts leaking it by accident.
+        return iter(
+            (
+                self.access_token,
+                self.refresh_token,
+                self.subscriber_id,
+                self.expires_in,
+                self.device_registration,
+            )
+        )
+
+    def __repr__(self) -> str:
+        # Never render tokens or the device secret — this object may end up in a
+        # traceback, an f-string or a log record.
+        return (
+            f"ClientLoginResult(subscriber_id={self.subscriber_id!r}, "
+            f"expires_in={self.expires_in!r}, "
+            f"device_registration={self.device_registration!r}, "
+            f"device_secret={'<redacted>' if self.device_secret else None})"
+        )
 
 
 class ClientAuthService:
@@ -53,13 +99,21 @@ class ClientAuthService:
         data: ClientLoginRequest,
         ip: str,
         user_agent: str | None,
-    ) -> tuple[str, str, str, int, str]:
-        """Returns (access_token, refresh_token, subscriber_id_str, expires_in_seconds,
+    ) -> ClientLoginResult:
+        """Returns a ClientLoginResult, which still unpacks as the historic
+        5-tuple (access_token, refresh_token, subscriber_id_str, expires_in_seconds,
         device_registration). device_registration is 'registered' or 'limit_reached'.
 
         Login NEVER fails because of the device cap: identity/status/credentials
         are validated, tokens are issued, and the device is registered only if
         there is room (raise_on_limit=False).
+
+        NX-DEV: when this login is what CREATES the device row, the freshly
+        generated plaintext device secret is returned in
+        ``result.device_secret`` so the caller can hand it to the client exactly
+        once. Without this the secret was generated, hashed, and dropped on the
+        floor — leaving every login-registered device permanently unable to
+        activate under DEVICE_SECRET_ENFORCE.
         """
         await self._check_lockout(data.username)
 
@@ -85,12 +139,16 @@ class ClientAuthService:
                 brand=data.brand,
                 device_type=data.device_type,
                 app_version=data.app_version,
+                os_version=data.os_version,
                 user_agent=user_agent,
             ),
             ip,
             raise_on_limit=False,  # login must not fail on device cap
         )
         device_registration = "registered" if device is not None else "limit_reached"
+        # Transient attribute, present only when register() just created the row.
+        # Existing device → absent. Cap reached → device is None. Both → no secret.
+        device_secret = getattr(device, "plaintext_secret", None) if device else None
 
         sub_id_str = str(subscriber.id)
         access_token, access_jti, expires_in = create_client_access_token(sub_id_str)
@@ -106,11 +164,21 @@ class ClientAuthService:
             settings.client_refresh_token_expire_days * 86400,
             sub_id_str,
         )
-        return access_token, refresh_token, sub_id_str, expires_in, device_registration
+        return ClientLoginResult(
+            access_token=access_token,
+            refresh_token=refresh_token,
+            subscriber_id=sub_id_str,
+            expires_in=expires_in,
+            device_registration=device_registration,
+            device_secret=device_secret,
+        )
 
     async def refresh(self, refresh_token_str: str) -> tuple[str, str, str, int]:
         """Returns (access_token, new_refresh_token, subscriber_id_str, expires_in_seconds).
         Rotates the refresh token — consumes old, issues new.
+
+        NX-DEV: refresh NEVER carries a device secret. No device row is created
+        here, and the plaintext of an existing one is not recoverable.
         """
         # enforce_surface honors JWT_REQUIRE_AUD: strict → require client_refresh +
         # aud=nexora-client + iss; compat → accept client_refresh only. An admin/

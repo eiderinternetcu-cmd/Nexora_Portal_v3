@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     jwt_require_aud: bool = False        # True → strict iss/aud/type per surface; False → legacy-compatible
     signed_url_enforce: bool = False     # True → playback_url carries ?token= and /stream/* requires it
     device_secret_enforce: bool = False  # True → playback requires an activated device (secret verified); False → legacy auto-register
+    catalog_entitlement_filter: bool = False  # True → /client/catalog/channels lists only the plan's channels; False → full active catalog
 
     # IPTV concurrency
     heartbeat_ttl_seconds: int = 180        # auto-disconnect after 3 missed heartbeats
@@ -48,6 +49,13 @@ class Settings(BaseSettings):
     # Pre-prod hardening (C-PROD-1 / C-PROD-2)
     stream_auth_cache_ttl_seconds: int = 180   # segment grant cache TTL (manifest seeds it)
     playback_ip_binding_mode: str = "off"      # off | soft | strict (default off — no break)
+
+    # Reissue hardening. GET /api/client/playback/{channel_id} does NOT re-evaluate
+    # entitlement, so a plan losing a channel mid-session keeps working until the
+    # IPTV session expires (4h). Turning this on re-runs EntitlementService on every
+    # reissue (~1 per 45s per stream, ~5 extra DB reads each); it only DENIES when
+    # entitlement_enforce is also on, otherwise it just logs. Default off = today.
+    playback_reissue_entitlement_check: bool = False
 
     # Grant hardening (M1). Bound the absolute life of a segment grant so a revoked
     # session cannot keep an in-flight stream alive indefinitely via renewal.

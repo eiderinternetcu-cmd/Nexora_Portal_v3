@@ -61,6 +61,16 @@ async def list_devices(
     return await svc.list_for_subscriber(subscriber.id)
 
 
+# NX-DEV — deliberate absence of a secret re-issue / rotation endpoint.
+# A `POST /devices/{id}/rotate-secret` guarded only by the client access token
+# would collapse the two factors into one: whoever steals an access token could
+# mint a fresh device secret and activate an attacker-controlled device,
+# defeating the very purpose of DEVICE_SECRET_ENFORCE (the strong-identity
+# replacement for Stalker MAC identity). The secret is therefore issued exactly
+# once, at creation, on both creation paths (login and this endpoint).
+# Recovery path when a client loses its secret: an operator deletes the device
+# (admin surface) and the client re-registers, which mints a new one. That keeps
+# re-issue behind an out-of-band, auditable authority instead of a bearer token.
 @router.post("/devices/register", response_model=DeviceRegisterResponse)
 async def register_device(
     data: ClientDeviceRegister,

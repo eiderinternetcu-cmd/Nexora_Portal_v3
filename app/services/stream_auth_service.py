@@ -20,6 +20,9 @@ Flujo validate() — backend-auth callback de Flussonic:
 Flujo create_token():
   - Para dispositivos ya conectados (ZSET activo + sesión DB activa)
   - No recarga subscription/plan — más ligero que authorize()
+  - Emite el MISMO conjunto de claims que authorize() (chn/sk/node/cip) cuando el
+    llamante los aporta, para que un token reemitido no quede exento del binding
+    de nodo ni de IP.
 
 Redis keys usados:
   nexora:playback:{jti}             → token corto (TTL: 60s)
@@ -501,6 +504,9 @@ class StreamAuthService:
         subscriber_id: uuid.UUID,
         device_id_str: str,
         channel_id: str | None = None,
+        channel_key: str | None = None,
+        node: str | None = None,
+        ip: str | None = None,
     ) -> PlaybackToken:
         """
         Reissue a playback token for a device already connected.
@@ -509,7 +515,21 @@ class StreamAuthService:
           - Active IPTV session in DB
 
         Lighter than authorize() — skips subscriber, subscription, and plan reload.
+
+        channel_id is the internal stream_key (claim 'sk'). channel_key is the
+        PUBLIC catalog key (claim 'chn'), node is the Flussonic node (claim
+        'node') and ip is the caller IP (hashed into claim 'cip'). All three are
+        optional so legacy callers (STB) keep their current token shape, but the
+        client reissue passes them so a reissued token is bound exactly like an
+        authorize() token — otherwise reissued tokens would be exempt from
+        node binding and IP binding (which only apply when the claim is set).
+
+        Entitlement is only re-evaluated when playback_reissue_entitlement_check
+        is on (default off — preserves the current "session lasts 4h" behavior).
         """
+        if settings.playback_reissue_entitlement_check:
+            await self._check_entitlement(subscriber_id, device_id_str, channel_key)
+
         device = await self._load_device(device_id_str)
 
         if device.subscriber_id != subscriber_id:
@@ -530,7 +550,8 @@ class StreamAuthService:
             )
 
         token, jti, ttl = self._issue_jwt(
-            subscriber_id, device.id, session.access_token_jti, stream_key=channel_id
+            subscriber_id, device.id, session.access_token_jti,
+            channel_key=channel_key, stream_key=channel_id, node=node, client_ip=ip,
         )
         await self._store_jwt(
             jti, subscriber_id, device.id, session.access_token_jti, channel_id, ttl
