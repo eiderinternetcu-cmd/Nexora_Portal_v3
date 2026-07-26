@@ -9,6 +9,7 @@ from app.services.audit_service import AuditService
 from app.schemas.device import DeviceRegister, DeviceHeartbeat, DeviceBlockRequest, DeviceOut
 from app.schemas.common import ApiResponse, MessageResponse
 from app.core.dependencies import require_admin_or_reseller, get_client_ip
+from app.api.stb.deps import stb_claims, resolve_stb_device_id
 from app.models.user import User
 
 router = APIRouter(prefix="/devices", tags=["Devices"])
@@ -51,14 +52,29 @@ async def heartbeat(
     request: Request,
     db: AsyncSession = Depends(get_db),
     redis=Depends(get_redis),
+    claims: dict | None = Depends(stb_claims),
 ):
     """
-    Heartbeat desde el dispositivo. No requiere autenticación de usuario admin —
-    el device_id identifica el dispositivo. Valida estado del suscriptor.
+    Heartbeat desde el dispositivo. Requiere token STB (type=stb_access).
+
+    Gemelo de POST /api/stb/heartbeat: llama al mismo DeviceService.heartbeat,
+    que renueva el slot del ZSET de conexiones y toca la sesión IPTV en DB.
+    Identificar el dispositivo solo por el `device_id` del body permitía a
+    cualquiera mantener viva la sesión de otro suscriptor y leer su plan y sus
+    conexiones activas en la respuesta. Endurecer únicamente la ruta /api/stb
+    no cerraba nada: esta era la misma puerta, publicada por el mismo
+    `location ^~ /api/` de nginx.
+
+    El `device_id` del body debe coincidir con el claim `dev` del token.
     """
+    device_id = resolve_stb_device_id(claims, body.device_id)
+    if device_id != body.device_id:
+        body = body.model_copy(update={"device_id": device_id})
+
     svc = DeviceService(db, redis)
     ip = get_client_ip(request)
     result = await svc.heartbeat(body, ip)
+    await db.commit()
     return ApiResponse(data=result)
 
 

@@ -14,8 +14,10 @@ from app.core.security import (
     enforce_surface,
     AUD_ADMIN,
     AUD_CLIENT,
+    AUD_STB,
     TYPE_ADMIN_ACCESS,
     TYPE_CLIENT_ACCESS,
+    TYPE_STB_ACCESS,
     LEGACY_ADMIN_ACCESS,
     LEGACY_CLIENT_ACCESS,
 )
@@ -89,6 +91,35 @@ async def get_client_token_payload(
     if not jti or not await redis.exists(key_client(jti)):
         raise unauthorized("Token has been revoked")
     return payload
+
+
+async def get_stb_token_payload(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    redis: aioredis.Redis = Depends(get_redis),
+) -> dict:
+    """Authenticate an STB/device caller (type=stb_access, aud=nexora-stb).
+
+    Returns the raw claims. `sub` (subscriber UUID) and `dev` (Device.device_id)
+    are the AUTHORITATIVE identity for the /api/stb/* surface — callers must
+    never take those from the request body.
+
+    The legacy set is deliberately just {stb_access}: with jwt_require_aud off,
+    aud/iss are not checked, so the token *type* is what keeps admin, client and
+    playback tokens off this surface. There is no cross-surface escape hatch.
+    """
+    if not credentials:
+        raise unauthorized("Missing Bearer token")
+    try:
+        claims = decode_claims(credentials.credentials)
+        enforce_surface(claims, TYPE_STB_ACCESS, AUD_STB, {TYPE_STB_ACCESS})
+    except InvalidTokenError:
+        raise unauthorized("Invalid or expired token")
+    if not claims.get("sub") or not claims.get("dev"):
+        raise unauthorized("STB token is missing its subscriber/device binding")
+    jti = claims.get("jti")
+    if jti and await redis.exists(key_blacklist(jti)):
+        raise unauthorized("Token has been revoked")
+    return claims
 
 
 async def get_current_subscriber(

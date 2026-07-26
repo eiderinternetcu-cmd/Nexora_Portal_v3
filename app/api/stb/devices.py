@@ -16,6 +16,7 @@ from app.services.connection_service import ConnectionService
 from app.schemas.device import DeviceHeartbeat, DeviceRegister, DeviceOut
 from app.schemas.common import ApiResponse
 from app.core.dependencies import require_admin_or_reseller, get_client_ip
+from app.api.stb.deps import stb_claims, resolve_stb_device_id
 from app.models.user import User
 
 router = APIRouter(prefix="", tags=["STB — Devices"])
@@ -27,12 +28,22 @@ async def stb_heartbeat(
     request: Request,
     db: AsyncSession = Depends(get_db),
     redis: aioredis.Redis = Depends(get_redis),
+    claims: dict | None = Depends(stb_claims),
 ):
     """
     Heartbeat STB. Llamado cada 60s por el dispositivo.
     Renueva el TTL en Redis ZSET (180s). Sin TTL: desconexión automática.
-    No requiere token de admin.
+
+    Requiere token STB (type=stb_access): el heartbeat renueva el slot del ZSET
+    y toca la sesión IPTV en DB, así que identificar al dispositivo únicamente
+    por el `device_id` del body permitía a cualquiera mantener viva la sesión de
+    otro suscriptor (y leer su plan/conexiones activas en la respuesta). El
+    `device_id` del body debe coincidir con el claim `dev` del token.
     """
+    device_id = resolve_stb_device_id(claims, body.device_id)
+    if device_id != body.device_id:
+        body = body.model_copy(update={"device_id": device_id})
+
     svc = DeviceService(db, redis)
     ip = get_client_ip(request)
     result = await svc.heartbeat(body, ip)

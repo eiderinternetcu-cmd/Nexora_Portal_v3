@@ -42,6 +42,19 @@ class Settings(BaseSettings):
     device_secret_enforce: bool = False  # True → playback requires an activated device (secret verified); False → legacy auto-register
     catalog_entitlement_filter: bool = False  # True → /client/catalog/channels lists only the plan's channels; False → full active catalog
 
+    # STB surface hardening. The /api/stb/* device endpoints historically took the
+    # caller's identity (subscriber_id / device_id) from the REQUEST BODY with no
+    # token at all, so anyone reaching /api/stb/auth/play could mint a playback
+    # token for ANY subscriber — an IDOR that also bypassed the entitlement gate.
+    # Default True = CLOSED: a valid STB token (type=stb_access, aud=nexora-stb)
+    # is required and its `sub`/`dev` claims are authoritative.
+    # Set to False ONLY as a temporary, documented escape hatch for legacy STB
+    # firmware that cannot send a token: it re-opens the IDOR and must be paired
+    # with network-level restriction of /api/stb/*. Even with the flag off, a
+    # token that IS presented is still fully validated, and the entitlement gate
+    # (ENTITLEMENT_ENFORCE) runs on both paths.
+    stb_auth_enforce: bool = True
+
     # IPTV concurrency
     heartbeat_ttl_seconds: int = 180        # auto-disconnect after 3 missed heartbeats
     playback_token_expire_seconds: int = 60 # short-lived: 30-120s for HLS/Flussonic
