@@ -14,11 +14,11 @@ export type PasswordModalProps = {
 
 /**
  * Cambio de la propia contrasena.
+ * POST /users/me/change-password: exige la contrasena actual y actua sobre el
+ * usuario de la sesion.
  *
- * La API solo tiene POST /users/me/change-password, que exige la contrasena
- * actual y actua sobre el usuario de la sesion. NO existe endpoint para que un
- * admin reponga la contrasena de otro usuario, asi que esta ventana no ofrece
- * esa opcion.
+ * Para reponer la de OTRO usuario esta UserPasswordResetModal, que usa
+ * POST /users/{user_id}/set-password y no pide la actual.
  */
 export function PasswordModal({ open, username, saving, onSubmit, onClose }: PasswordModalProps) {
   const [current, setCurrent] = useState("");

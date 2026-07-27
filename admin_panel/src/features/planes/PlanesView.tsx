@@ -38,8 +38,9 @@ const formatPrice = (value: Plan["price"]) => {
  *   PATCH  /plans/{id}       -> ApiResponse<Plan>     (solo admin)
  *   DELETE /plans/{id}       -> MessageResponse       (solo admin)
  *
- * Los canales incluidos en cada plan NO son gestionables: la API no expone
- * `plan_channels`. Ver PlanChannelsModal.
+ * La lista blanca de canales de cada plan se edita en PlanChannelsModal
+ * (GET/PUT /plans/{id}/channels). Leerla vale para admin y reseller;
+ * modificarla, solo para admin.
  */
 export function PlanesView() {
   const api = useApi();
@@ -268,8 +269,9 @@ export function PlanesView() {
         <div className="planes-heading">
           <h2>Planes</h2>
           <p>
-            Catalogo comercial. Los canales que incluye cada plan se administran
-            fuera del panel: la API todavia no expone <code>plan_channels</code>.
+            Catalogo comercial. Con <strong>Canales</strong> se edita la lista blanca de
+            cada plan: solo se reproduce lo que este incluido, y un plan sin canales
+            no deja ver nada.
           </p>
         </div>
         <div className="planes-header-actions">
@@ -310,6 +312,7 @@ export function PlanesView() {
       <PlanChannelsModal
         open={channelsTarget !== null}
         plan={channelsTarget}
+        canEdit={isAdmin}
         onClose={() => setChannelsTarget(null)}
       />
 

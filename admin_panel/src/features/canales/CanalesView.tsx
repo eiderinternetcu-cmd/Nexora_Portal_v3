@@ -2,7 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Eye, EyeOff, Info, Radio, RefreshCw, Satellite } from "lucide-react";
 
 import { ApiError, messageForError } from "../../api/errors";
-import type { Channel, StreamStatus } from "../../api/types";
+import type {
+  Channel,
+  FlussonicHealthOut,
+  FlussonicStreamItem,
+  StreamStatus,
+} from "../../api/types";
 import { useApi } from "../../auth/AuthContext";
 import {
   Button,
@@ -35,22 +40,6 @@ import "./canales.css";
  *   - `source_url` NO se pinta nunca: en fuentes de tipo pull suele llevar
  *     usuario y contrasena del origen embebidos. Solo se indica si esta puesta.
  */
-
-/** `FlussonicHealthOut` (app/api/admin/flussonic.py). No existe en src/api/types.ts. */
-type FlussonicHealth = {
-  configured: boolean;
-  reachable: boolean;
-  /** Solo host:puerto; la API se encarga de no incluir credenciales. */
-  base_url_host: string;
-};
-
-/** `FlussonicStreamItem` (app/api/admin/flussonic.py). Tampoco esta en types.ts. */
-type FlussonicStream = {
-  name: string;
-  alive: boolean;
-  client_count: number;
-  hls_url: string;
-};
 
 type Recurso<T> = {
   datos: T | null;
@@ -107,8 +96,8 @@ export function CanalesView() {
   const [cargandoCanales, setCargandoCanales] = useState(true);
   const [errorCanales, setErrorCanales] = useState<string | null>(null);
 
-  const [salud, setSalud] = useState<Recurso<FlussonicHealth>>(recursoInicial);
-  const [streams, setStreams] = useState<Recurso<FlussonicStream[]>>(recursoInicial);
+  const [salud, setSalud] = useState<Recurso<FlussonicHealthOut>>(recursoInicial);
+  const [streams, setStreams] = useState<Recurso<FlussonicStreamItem[]>>(recursoInicial);
 
   const [busqueda, setBusqueda] = useState("");
   const [filtroEstado, setFiltroEstado] = useState<"todos" | "activos" | "inactivos">("todos");
@@ -151,8 +140,8 @@ export function CanalesView() {
     setStreams((previo) => ({ ...previo, cargando: true }));
 
     const [resSalud, resStreams] = await Promise.allSettled([
-      api.get<FlussonicHealth>("/flussonic/health"),
-      api.get<FlussonicStream[]>("/flussonic/streams"),
+      api.get<FlussonicHealthOut>("/flussonic/health"),
+      api.get<FlussonicStreamItem[]>("/flussonic/streams"),
     ]);
     if (!montado.current) return;
 
@@ -262,7 +251,7 @@ export function CanalesView() {
     },
   ];
 
-  const columnasStreams: Column<FlussonicStream>[] = [
+  const columnasStreams: Column<FlussonicStreamItem>[] = [
     { key: "nombre", header: "Stream", render: (fila) => <span className="can-mono">{fila.name}</span> },
     {
       key: "vivo",

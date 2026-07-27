@@ -137,6 +137,18 @@ export type UserPasswordChange = {
   new_password: string;
 };
 
+/**
+ * `UserPasswordSet` — cuerpo de POST /users/{user_id}/set-password.
+ *
+ * Reposicion hecha por un admin sobre OTRO usuario: no pide la contrasena
+ * actual porque el caso de uso es que el usuario la ha perdido. Mantiene el
+ * minimo de 8 caracteres de UserCreate/UserPasswordChange.
+ */
+export type UserPasswordSet = {
+  /** min 8, max 128 */
+  new_password: string;
+};
+
 // ---------------------------------------------------------------------------
 // Suscriptores  (app/schemas/subscriber.py, app/models/subscriber.py)
 // ---------------------------------------------------------------------------
@@ -239,6 +251,54 @@ export type PlanUpdate = Partial<PlanCreate> & {
 };
 
 // ---------------------------------------------------------------------------
+// Lista blanca de canales por plan  (app/schemas/plan_channel.py)
+// ---------------------------------------------------------------------------
+
+/**
+ * `PlanChannelOut` — un canal del catalogo visto desde la lista blanca de un plan.
+ *
+ * `id` es el ID DEL CANAL, que es justo lo que aceptan los endpoints de
+ * escritura (la fila de plan_channels no se expone: se edita la pertenencia).
+ *
+ * `included` es true solo si existe fila con `is_enabled` — exactamente la
+ * condicion que comprueba EntitlementService antes de permitir reproducir.
+ *
+ * `is_active` es del CANAL, no del plan: incluir un canal inactivo no sirve de
+ * nada porque no se emite.
+ */
+export type PlanChannel = {
+  id: string;
+  channel_key: string;
+  number: number;
+  name: string;
+  category: string | null;
+  logo_url: string | null;
+  is_active: boolean;
+  included: boolean;
+};
+
+/**
+ * `PlanChannelsReplace` — cuerpo del PUT: la lista blanca COMPLETA deseada.
+ *
+ * Una lista vacia es legal y significa "este plan no incluye ningun canal", lo
+ * que deniega la reproduccion de TODO a sus suscriptores. No da acceso total.
+ */
+export type PlanChannelsReplace = {
+  channel_ids: string[];
+};
+
+/** `PlanChannelsSummary` — lo que cambio de verdad una escritura. */
+export type PlanChannelsSummary = {
+  plan_id: string;
+  /** Canales que NO estaban incluidos y ahora si. */
+  added: number;
+  /** Filas de plan_channels eliminadas. */
+  removed: number;
+  /** Canales incluidos por el plan despues de la operacion. */
+  total: number;
+};
+
+// ---------------------------------------------------------------------------
 // Suscripciones  (app/schemas/subscription.py)
 // ---------------------------------------------------------------------------
 
@@ -321,6 +381,26 @@ export type StreamStatus = {
   client_count: number;
   input_alive: boolean;
   flussonic_configured: boolean;
+};
+
+// ---------------------------------------------------------------------------
+// Flussonic  (app/api/admin/flussonic.py) — respuestas SIN envoltura
+// ---------------------------------------------------------------------------
+
+/** `FlussonicHealthOut` — GET {prefix}/flussonic/health. */
+export type FlussonicHealthOut = {
+  configured: boolean;
+  reachable: boolean;
+  /** Solo host:puerto; la API nunca incluye credenciales. */
+  base_url_host: string;
+};
+
+/** `FlussonicStreamItem` — GET {prefix}/flussonic/streams (503 si no configurado). */
+export type FlussonicStreamItem = {
+  name: string;
+  alive: boolean;
+  client_count: number;
+  hls_url: string;
 };
 
 // ---------------------------------------------------------------------------
@@ -423,4 +503,17 @@ export type PageQuery = {
 
 export type SubscriberListQuery = PageQuery & {
   status?: SubscriberStatus;
+  /**
+   * Busqueda libre EN SERVIDOR (max 128): username, full_name, email e
+   * id_cedula (SubscriberService.list_subscribers). Recorre toda la base, no
+   * solo la pagina cargada.
+   */
+  q?: string;
+};
+
+export type UserListQuery = PageQuery & {
+  /** Busqueda libre EN SERVIDOR (max 128): username, full_name y email. */
+  q?: string;
+  role?: UserRole;
+  is_active?: boolean;
 };

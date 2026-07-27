@@ -79,8 +79,8 @@
   color: var(--text);
 }
 
-/* Panel del hueco de la API: canales incluidos en el plan. */
-.planes-gap {
+/* Lista blanca de canales del plan (PlanChannelsModal). */
+.planes-canales {
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -88,60 +88,162 @@
   color: var(--text);
 }
 
-.planes-gap-warning {
+.planes-canales-aviso {
   display: flex;
   gap: 10px;
   padding: 12px 14px;
   border-radius: var(--radius);
   border: 1px solid rgba(var(--warn-rgb), 0.4);
   background: rgba(var(--warn-rgb), 0.1);
-  color: var(--text);
   line-height: 1.5;
 }
 
-.planes-gap-warning svg {
+.planes-canales-aviso svg {
   flex: 0 0 auto;
   color: var(--warn);
   margin-top: 2px;
 }
 
-.planes-gap h4 {
-  font-size: 13px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--text-muted);
-}
-
-.planes-gap p {
-  line-height: 1.55;
-  color: var(--text-muted);
-}
-
-.planes-gap pre {
-  font-family: var(--font-mono);
-  font-size: 12.5px;
-  padding: 10px 12px;
+.planes-canales-error {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
   border-radius: var(--radius);
-  border: 1px solid var(--border);
-  background: var(--surface-2);
-  color: var(--text);
-  overflow-x: auto;
-  white-space: pre;
+  border: 1px solid rgba(var(--danger-rgb), 0.45);
+  background: rgba(var(--danger-rgb), 0.12);
 }
 
-.planes-gap-list {
+.planes-canales-error svg {
+  flex: 0 0 auto;
+  color: var(--danger);
+}
+
+.planes-canales-error span {
+  flex: 1 1 auto;
+}
+
+.planes-canales-estado {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.55;
+}
+
+.planes-canales-nota {
+  font-size: 12.5px;
+  color: var(--text-dim);
+  line-height: 1.55;
+}
+
+.planes-canales-barra {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.planes-canales-barra .input {
+  flex: 1 1 260px;
+}
+
+.planes-canales-resumen {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+  color: var(--text-dim);
+}
+
+.planes-canales-cambios {
+  color: var(--warn);
+  font-variant-numeric: tabular-nums;
+}
+
+.planes-canales-lista {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding-left: 18px;
-  color: var(--text-muted);
-  line-height: 1.55;
+  gap: 2px;
+  max-height: 44vh;
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
 }
 
-.planes-gap-list li {
-  list-style: disc;
+.planes-canal {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 9px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
 }
 
-.planes-gap-list code {
+.planes-canal:hover {
+  background: var(--surface-3);
+}
+
+.planes-canal input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  accent-color: var(--brand);
+  cursor: pointer;
+}
+
+.planes-canal input[type="checkbox"]:disabled {
+  cursor: not-allowed;
+}
+
+.planes-canal-num {
+  flex: 0 0 44px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}
+
+.planes-canal-datos {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.planes-canal-nombre {
   color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.planes-canal-meta {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.planes-canal-marca {
+  flex: 0 0 auto;
+}
+
+/* Canal inactivo: no emite, incluirlo no habilita nada. Se distingue a simple
+   vista para que nadie crea que lo esta activando desde aqui. */
+.planes-canal-inactivo {
+  background: repeating-linear-gradient(
+    135deg,
+    transparent,
+    transparent 6px,
+    rgba(var(--warn-rgb), 0.05) 6px,
+    rgba(var(--warn-rgb), 0.05) 12px
+  );
+}
+
+.planes-canal-inactivo .planes-canal-nombre,
+.planes-canal-inactivo .planes-canal-num {
+  color: var(--text-dim);
 }

@@ -9,13 +9,16 @@ import type {
   Channel,
   Device,
   DeviceBlockRequest,
+  FlussonicHealthOut,
+  FlussonicStreamItem,
   LiveSession,
   LoginRequest,
   MessageResponse,
   NodeHealth,
-  PageQuery,
   PaginatedResponse,
   Plan,
+  PlanChannel,
+  PlanChannelsSummary,
   PlanCreate,
   PlanUpdate,
   StreamStatus,
@@ -33,6 +36,7 @@ import type {
   TokenResponse,
   User,
   UserCreate,
+  UserListQuery,
   UserPasswordChange,
   UserUpdate,
 } from "./types";
@@ -194,7 +198,8 @@ export class AdminClient {
   // Usuarios del panel  (requiere rol admin)
   // -------------------------------------------------------------------------
 
-  listUsers(query: PageQuery = {}) {
+  /** `q`, `role` e `is_active` los filtra la API sobre TODA la tabla. */
+  listUsers(query: UserListQuery = {}) {
     return this.get<PaginatedResponse<User>>("/users", { query });
   }
 
@@ -216,6 +221,18 @@ export class AdminClient {
 
   changeOwnPassword(body: UserPasswordChange) {
     return this.post<MessageResponse>("/users/me/change-password", body);
+  }
+
+  /**
+   * POST /users/{user_id}/set-password — reposicion por un admin sobre OTRO
+   * usuario. No pide la contrasena actual (el caso de uso es que se ha
+   * perdido); minimo 8 caracteres, igual que el cambio propio.
+   */
+  setUserPassword(userId: string, newPassword: string) {
+    return this.post<MessageResponse>(
+      `/users/${encodeURIComponent(userId)}/set-password`,
+      { new_password: newPassword },
+    );
   }
 
   // -------------------------------------------------------------------------
@@ -285,6 +302,57 @@ export class AdminClient {
 
   deletePlan(planId: string) {
     return this.del<MessageResponse>(`/plans/${encodeURIComponent(planId)}`);
+  }
+
+  // -------------------------------------------------------------------------
+  // Lista blanca de canales de un plan  (app/api/admin/plan_channels.py)
+  //
+  // plan_channels decide, por plan, que canales se pueden ver: sin fila
+  // habilitada EntitlementService deniega con CHANNEL_NOT_INCLUDED. Un plan con
+  // CERO canales no da acceso a todo, da acceso a NADA.
+  //
+  // Leer: admin o reseller. Escribir: solo admin, y queda auditado.
+  // -------------------------------------------------------------------------
+
+  /**
+   * GET /plans/{plan_id}/channels
+   *
+   * Con `includeExcluded` la API devuelve el CATALOGO COMPLETO marcando en cada
+   * canal `included` (pertenece al plan) e `is_active` (el canal emite). Una
+   * sola llamada resuelve la pantalla de edicion: no hay que cruzar este
+   * listado con /channels.
+   */
+  listPlanChannels(planId: string, includeExcluded = false) {
+    return this.get<ApiResponse<PlanChannel[]>>(
+      `/plans/${encodeURIComponent(planId)}/channels`,
+      { query: includeExcluded ? { include_excluded: true } : undefined },
+    );
+  }
+
+  /**
+   * PUT /plans/{plan_id}/channels — reemplazo ATOMICO de la lista blanca.
+   * `channelIds` es la lista completa deseada; una lista vacia deja el plan sin
+   * ningun canal reproducible.
+   */
+  replacePlanChannels(planId: string, channelIds: string[]) {
+    return this.put<ApiResponse<PlanChannelsSummary>>(
+      `/plans/${encodeURIComponent(planId)}/channels`,
+      { channel_ids: channelIds },
+    );
+  }
+
+  /** POST /plans/{plan_id}/channels/{channel_id} — alta idempotente de un canal. */
+  addPlanChannel(planId: string, channelId: string) {
+    return this.post<ApiResponse<PlanChannelsSummary>>(
+      `/plans/${encodeURIComponent(planId)}/channels/${encodeURIComponent(channelId)}`,
+    );
+  }
+
+  /** DELETE /plans/{plan_id}/channels/{channel_id} — baja idempotente de un canal. */
+  removePlanChannel(planId: string, channelId: string) {
+    return this.del<ApiResponse<PlanChannelsSummary>>(
+      `/plans/${encodeURIComponent(planId)}/channels/${encodeURIComponent(channelId)}`,
+    );
   }
 
   // -------------------------------------------------------------------------
@@ -358,6 +426,20 @@ export class AdminClient {
 
   getChannelStreamStatus(channelId: string) {
     return this.get<StreamStatus>(`/channels/${encodeURIComponent(channelId)}/stream-status`);
+  }
+
+  // -------------------------------------------------------------------------
+  // Flussonic  (solo lectura, respuestas sin envoltura)
+  // -------------------------------------------------------------------------
+
+  /** GET /flussonic/health. Nunca devuelve credenciales, solo host:puerto. */
+  getFlussonicHealth() {
+    return this.get<FlussonicHealthOut>("/flussonic/health");
+  }
+
+  /** GET /flussonic/streams. 503 si Flussonic no esta configurado en la API. */
+  listFlussonicStreams() {
+    return this.get<FlussonicStreamItem[]>("/flussonic/streams");
   }
 
   // -------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Ban, CheckCircle2, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
 
@@ -23,18 +23,20 @@ import "./suscriptores.css";
 
 const TAMANOS_PAGINA = [25, 50, 100, 200];
 
+/** Espera antes de consultar para no lanzar una peticion por tecla pulsada. */
+const RETARDO_BUSQUEDA_MS = 350;
+
 type FiltroEstado = SubscriberStatus | "";
 
 /**
  * Listado de suscriptores.
  *
- * GET /api/admin/subscribers?page=&page_size=&status=  -> PaginatedResponse
+ * GET /api/admin/subscribers?page=&page_size=&status=&q=  -> PaginatedResponse
  *
- * La paginacion es REAL (la hace la API con offset/limit). El buscador, en
- * cambio, filtra sobre la pagina ya cargada: GET /subscribers no acepta ningun
- * parametro de texto (app/api/v1/subscribers.py:20 y
- * SubscriberService.list_subscribers). Se avisa en la propia barra para que
- * nadie crea que busca en toda la base.
+ * Paginacion, estado y BUSQUEDA los resuelve la API. `q` recorre toda la base
+ * (username, full_name, email e id_cedula, SubscriberService.list_subscribers),
+ * no la pagina cargada, asi que el total y las paginas que se muestran ya son
+ * los del resultado de la busqueda.
  */
 export function SuscriptoresView() {
   const api = useApi();
@@ -47,7 +49,10 @@ export function SuscriptoresView() {
   const [pagina, setPagina] = useState(1);
   const [tamano, setTamano] = useState(50);
   const [estado, setEstado] = useState<FiltroEstado>("");
+  /** Lo que se esta escribiendo. */
   const [busqueda, setBusqueda] = useState("");
+  /** Lo que ya se ha mandado a la API (busqueda con retardo aplicado). */
+  const [consulta, setConsulta] = useState("");
 
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -70,6 +75,7 @@ export function SuscriptoresView() {
         page: pagina,
         page_size: tamano,
         status: estado || undefined,
+        q: consulta || undefined,
       });
       if (actual !== generacion.current) return;
       setFilas(respuesta.data);
@@ -84,21 +90,24 @@ export function SuscriptoresView() {
     } finally {
       if (actual === generacion.current) setCargando(false);
     }
-  }, [api, pagina, tamano, estado]);
+  }, [api, pagina, tamano, estado, consulta]);
 
   useEffect(() => {
     void cargar();
   }, [cargar]);
 
-  const visibles = useMemo(() => {
-    const texto = busqueda.trim().toLowerCase();
-    if (!texto) return filas;
-    return filas.filter((fila) =>
-      [fila.username, fila.full_name, fila.email, fila.phone, fila.id_cedula]
-        .filter((valor): valor is string => Boolean(valor))
-        .some((valor) => valor.toLowerCase().includes(texto)),
-    );
-  }, [filas, busqueda]);
+  // Retardo del buscador: se consulta cuando el usuario deja de escribir. Al
+  // cambiar el texto se vuelve a la pagina 1, porque el numero de paginas del
+  // resultado anterior no tiene nada que ver con el de la busqueda nueva.
+  useEffect(() => {
+    const temporizador = window.setTimeout(() => {
+      setConsulta(busqueda.trim());
+      setPagina(1);
+    }, RETARDO_BUSQUEDA_MS);
+    return () => window.clearTimeout(temporizador);
+  }, [busqueda]);
+
+  const buscando = busqueda.trim() !== consulta;
 
   const cambiarEstado = (valor: FiltroEstado) => {
     setEstado(valor);
@@ -281,8 +290,10 @@ export function SuscriptoresView() {
           </label>
           <TextInput
             id="susc-busqueda"
+            type="search"
             value={busqueda}
-            placeholder="Usuario, nombre, email, telefono o cedula"
+            placeholder="Usuario, nombre, email o cedula"
+            maxLength={128}
             onChange={(evento) => setBusqueda(evento.target.value)}
           />
         </div>
@@ -320,23 +331,23 @@ export function SuscriptoresView() {
           </Select>
         </div>
         <p className="susc-toolbar-hint">
-          El estado y la paginacion los resuelve la API. La busqueda por texto filtra
-          solo la pagina cargada: la API no ofrece busqueda por texto en
-          <code> GET /subscribers</code>.
+          La busqueda, el estado y la paginacion los resuelve la API: se busca sobre
+          <strong> todos</strong> los suscriptores por usuario, nombre, email y cedula.
+          El telefono no entra en la busqueda del servidor.
         </p>
       </div>
 
       <DataTable
         columns={columnas}
-        rows={visibles}
+        rows={filas}
         rowKey={(fila) => fila.id}
         loading={cargando}
         error={error}
         onRetry={() => void cargar()}
         caption="Suscriptores"
         emptyMessage={
-          busqueda.trim()
-            ? "Ningun suscriptor de esta pagina coincide con la busqueda."
+          consulta
+            ? `Ningun suscriptor coincide con "${consulta}".`
             : "No hay suscriptores con estos filtros."
         }
         onRowClick={(fila) => navigate(`/suscriptores/${fila.id}`)}
@@ -346,7 +357,11 @@ export function SuscriptoresView() {
               {total === 0
                 ? "Sin resultados"
                 : `${desde}-${hasta} de ${total} · pagina ${pagina} de ${Math.max(paginas, 1)}`}
-              {busqueda.trim() ? ` · ${visibles.length} tras filtrar` : ""}
+              {buscando
+                ? " · actualizando busqueda..."
+                : consulta
+                  ? ` · filtrado por "${consulta}"`
+                  : ""}
             </span>
             <div className="susc-pager-buttons">
               <Button

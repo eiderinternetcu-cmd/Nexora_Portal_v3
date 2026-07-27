@@ -17,7 +17,9 @@ import {
   Button,
   ConfirmDialog,
   DataTable,
+  Select,
   StatusBadge,
+  TextInput,
   toneForBoolean,
   useToast,
 } from "../../ui/primitives";
@@ -25,9 +27,15 @@ import type { Column } from "../../ui/primitives";
 import { PasswordModal } from "./PasswordModal";
 import { UserFormModal } from "./UserFormModal";
 import type { UserFormPayload } from "./UserFormModal";
+import { UserPasswordResetModal } from "./UserPasswordResetModal";
 import "./usuarios.css";
 
 const PAGE_SIZE = 25;
+
+/** Espera antes de consultar para no lanzar una peticion por tecla pulsada. */
+const SEARCH_DELAY_MS = 350;
+
+type ActiveFilter = "" | "true" | "false";
 
 const formatDateTime = (value: string | null) => {
   if (!value) return "Nunca";
@@ -48,12 +56,15 @@ const otherRole = (role: UserRole): UserRole => (role === "admin" ? "reseller" :
  * Personal que administra la plataforma. NO son clientes: los clientes viven en
  * Suscriptores. Solo hay dos roles (app/models/user.py): admin y reseller.
  *
- * Endpoints (prefijo /api/admin, todos exigen rol admin salvo el ultimo):
- *   GET    /users                    -> PaginatedResponse<User>
- *   POST   /users                    -> ApiResponse<User>
- *   PATCH  /users/{id}               -> ApiResponse<User>   (email, nombre, rol, activo, notas)
- *   DELETE /users/{id}               -> MessageResponse
- *   POST   /users/me/change-password -> MessageResponse     (solo la propia cuenta)
+ * Endpoints (prefijo /api/admin, todos exigen rol admin):
+ *   GET    /users?q=&role=&is_active= -> PaginatedResponse<User>
+ *   POST   /users                     -> ApiResponse<User>
+ *   PATCH  /users/{id}                -> ApiResponse<User>  (email, nombre, rol, activo, notas)
+ *   DELETE /users/{id}                -> MessageResponse
+ *   POST   /users/me/change-password  -> MessageResponse    (la propia cuenta, pide la actual)
+ *   POST   /users/{id}/set-password   -> MessageResponse    (reponer la de otro usuario)
+ *
+ * Los tres filtros los aplica la API sobre toda la tabla, no sobre la pagina.
  *
  * El guard de ruta ya limita la seccion a admin, pero aqui no se supone nada:
  * si la API responde 403 se muestra explicitamente.
@@ -71,6 +82,12 @@ export function UsuariosView() {
   const [error, setError] = useState<string | null>(null);
   const [forbidden, setForbidden] = useState(false);
 
+  // Filtros del servidor: lo que se escribe (search) y lo ya consultado (query).
+  const [search, setSearch] = useState("");
+  const [query, setQuery] = useState("");
+  const [roleFilter, setRoleFilter] = useState<UserRole | "">("");
+  const [activeFilter, setActiveFilter] = useState<ActiveFilter>("");
+
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<User | null>(null);
   const [saving, setSaving] = useState(false);
@@ -85,6 +102,8 @@ export function UsuariosView() {
 
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
+  /** Usuario ajeno al que se le va a reponer la contrasena (set-password). */
+  const [resetTarget, setResetTarget] = useState<User | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -92,7 +111,14 @@ export function UsuariosView() {
     setForbidden(false);
     try {
       // PaginatedResponse<User>: filas en .data, ademas total/page/pages.
-      const response = await api.listUsers({ page, page_size: PAGE_SIZE });
+      const response = await api.listUsers({
+        page,
+        page_size: PAGE_SIZE,
+        q: query || undefined,
+        role: roleFilter || undefined,
+        // "" = sin filtro; hay que distinguirlo de false, que si filtra.
+        is_active: activeFilter === "" ? undefined : activeFilter === "true",
+      });
       setUsers(response.data ?? []);
       setTotal(response.total);
       setPages(response.pages);
@@ -109,11 +135,24 @@ export function UsuariosView() {
     } finally {
       setLoading(false);
     }
-  }, [api, page]);
+  }, [api, page, query, roleFilter, activeFilter]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Retardo del buscador: se consulta cuando el usuario deja de escribir. Se
+  // vuelve a la pagina 1 porque el numero de paginas cambia con el filtro.
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setQuery(search.trim());
+      setPage(1);
+    }, SEARCH_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [search]);
+
+  const searching = search.trim() !== query;
+  const hasFilters = query !== "" || roleFilter !== "" || activeFilter !== "";
 
   const reportError = (err: unknown) => {
     if (err instanceof ApiError && err.status === 403) {
@@ -320,13 +359,17 @@ export function UsuariosView() {
               size="sm"
               variant="ghost"
               icon={<KeyRound size={15} />}
-              disabled={!isSelf}
               title={
                 isSelf
-                  ? undefined
-                  : "La API solo permite cambiar la contrasena propia (POST /users/me/change-password)."
+                  ? "Cambiar tu contrasena (pide la actual)."
+                  : `Reponer la contrasena de ${row.username} sin conocer la actual.`
               }
-              onClick={() => setPasswordOpen(true)}
+              onClick={() => {
+                // Dos endpoints distintos: la propia exige la contrasena
+                // actual; la de otro usuario es una reposicion de admin.
+                if (isSelf) setPasswordOpen(true);
+                else setResetTarget(row);
+              }}
             >
               Contrasena
             </Button>
@@ -394,6 +437,63 @@ export function UsuariosView() {
         </div>
       ) : null}
 
+      <div className="usuarios-toolbar">
+        <div className="usuarios-toolbar-field usuarios-grow">
+          <label className="usuarios-toolbar-label" htmlFor="usuarios-buscar">
+            Buscar
+          </label>
+          <TextInput
+            id="usuarios-buscar"
+            type="search"
+            value={search}
+            placeholder="Usuario, nombre o email"
+            maxLength={128}
+            disabled={forbidden}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+        </div>
+        <div className="usuarios-toolbar-field">
+          <label className="usuarios-toolbar-label" htmlFor="usuarios-rol">
+            Rol
+          </label>
+          <Select
+            id="usuarios-rol"
+            value={roleFilter}
+            disabled={forbidden}
+            onChange={(event) => {
+              setRoleFilter(event.target.value as UserRole | "");
+              setPage(1);
+            }}
+          >
+            <option value="">Todos</option>
+            <option value="admin">admin</option>
+            <option value="reseller">reseller</option>
+          </Select>
+        </div>
+        <div className="usuarios-toolbar-field">
+          <label className="usuarios-toolbar-label" htmlFor="usuarios-estado">
+            Estado
+          </label>
+          <Select
+            id="usuarios-estado"
+            value={activeFilter}
+            disabled={forbidden}
+            onChange={(event) => {
+              setActiveFilter(event.target.value as ActiveFilter);
+              setPage(1);
+            }}
+          >
+            <option value="">Todos</option>
+            <option value="true">Activos</option>
+            <option value="false">Inactivos</option>
+          </Select>
+        </div>
+        <p className="usuarios-toolbar-hint">
+          Los tres filtros los aplica la API sobre todos los usuarios, no solo sobre la
+          pagina que estas viendo.
+        </p>
+      </div>
+
       <DataTable
         columns={columns}
         rows={users}
@@ -401,7 +501,11 @@ export function UsuariosView() {
         loading={loading}
         error={error}
         onRetry={() => void load()}
-        emptyMessage="No hay usuarios en esta pagina."
+        emptyMessage={
+          hasFilters
+            ? "Ningun usuario coincide con los filtros."
+            : "No hay usuarios en esta pagina."
+        }
         caption="Listado de usuarios del panel"
         footer={
           <div className="usuarios-pager">
@@ -409,6 +513,7 @@ export function UsuariosView() {
               {total === 0
                 ? "0 usuarios"
                 : `${rangeStart}-${rangeEnd} de ${total} usuarios · pagina ${page} de ${pages}`}
+              {searching ? " · actualizando busqueda..." : ""}
             </span>
             <div className="usuarios-pager-buttons">
               <Button
@@ -450,6 +555,12 @@ export function UsuariosView() {
         onClose={() => {
           if (!changingPassword) setPasswordOpen(false);
         }}
+      />
+
+      <UserPasswordResetModal
+        open={resetTarget !== null}
+        user={resetTarget}
+        onClose={() => setResetTarget(null)}
       />
 
       <ConfirmDialog
