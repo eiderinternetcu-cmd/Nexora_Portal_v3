@@ -123,6 +123,33 @@ services:
         -hls_segment_filename /hls/CARACOL-COL/seg_%05d.ts
         /hls/CARACOL-COL/index.m3u8
 
+  tc_warner:
+    image: jrottenberg/ffmpeg:6.1-alpine
+    container_name: nexora_tc_warner
+    restart: unless-stopped
+    cpus: 0.9
+    networks: [nexora_net]
+    volumes:
+      - hls_data:/hls
+    entrypoint: ["/bin/sh", "-c"]
+    # MPEG-2 720x480. El stream estaba muerto (apuntaba a un listener SRT vacio
+    # del propio servidor, 320 reintentos) y se repunto al multicast de Astra
+    # 239.0.0.16 el 2026-07-27.
+    command:
+      - >-
+        mkdir -p /hls/WARNER &&
+        exec ffmpeg -hide_banner -loglevel warning
+        -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5
+        -i http://181.78.246.211:8002/WARNER/mpegts
+        -c:v libx264 -preset ultrafast -pix_fmt yuv420p
+        -b:v 1500k -maxrate 1700k -bufsize 3000k
+        -g 60 -keyint_min 60 -sc_threshold 0
+        -c:a aac -b:a 128k -ac 2
+        -f hls -hls_time 4 -hls_list_size 6
+        -hls_flags delete_segments+append_list+omit_endlist
+        -hls_segment_filename /hls/WARNER/seg_%05d.ts
+        /hls/WARNER/index.m3u8
+
   tc_golden:
     image: jrottenberg/ffmpeg:6.1-alpine
     container_name: nexora_tc_golden
