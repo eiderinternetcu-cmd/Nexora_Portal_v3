@@ -5,6 +5,8 @@ playback_url priority (never exposes Flussonic credentials):
   2. channel.source_url from local DB (fallback manual URL)
   3. None  → frontend uses VITE_NEXORA_PLAYBACK_URL_TEMPLATE or shows error
 """
+from urllib.parse import urlsplit, urlunsplit
+
 from fastapi import APIRouter, Depends, Query, Request
 import redis.asyncio as aioredis
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -46,7 +48,69 @@ def _get_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
-def _resolve_playback_url(channel: Channel | None, stream_key: str | None) -> str | None:
+_FORWARDED_SCHEMES = ("http", "https")
+
+
+def _request_origin(request: Request | None) -> tuple[str, str] | None:
+    """Return (scheme, host) to serve playback from, or None to keep the fixed base.
+
+    SECURITY — Host and X-Forwarded-Host are CLIENT-CONTROLLED. Building the
+    playback_url from an arbitrary Host is Host header injection: a request with
+    `Host: evil.tld` would hand the subscriber a stream URL on the attacker's
+    domain, and the player would send the playback token there. So the header is
+    never copied into the URL; it only SELECTS an entry from
+    PLAYBACK_HOST_ALLOWLIST and the value returned is the CONFIGURED spelling.
+    Unlisted host, missing header or empty allowlist → None → fixed base_url.
+    """
+    if request is None:
+        return None
+
+    allowed = settings.playback_allowed_hosts
+    if not allowed:
+        return None
+
+    # X-Forwarded-Host first (nginx sets it explicitly alongside Host); a chained
+    # proxy may append, so only the first hop is considered.
+    raw_host = request.headers.get("X-Forwarded-Host") or request.headers.get("Host") or ""
+    host = allowed.get(raw_host.split(",")[0].strip().lower())
+    if not host:
+        return None
+
+    # Behind nginx the request reaches the app over plain http, so the real
+    # client scheme comes from X-Forwarded-Proto.
+    proto = (request.headers.get("X-Forwarded-Proto") or "").split(",")[0].strip().lower()
+    if proto not in _FORWARDED_SCHEMES:
+        proto = request.url.scheme
+    return proto, host
+
+
+def _rewrite_origin(url: str | None, origin: tuple[str, str] | None) -> str | None:
+    """Swap scheme+host of an absolute URL, keeping path/query/fragment intact.
+
+    The path configured in the node base_url (e.g. /stream/ec-main) is part of
+    the path, so it survives: https://a.tld/stream/ec-main/K1/index.m3u8 with
+    origin ("https", "b.tld") → https://b.tld/stream/ec-main/K1/index.m3u8.
+    """
+    if not url or origin is None:
+        return url
+
+    parts = urlsplit(url)
+    if not parts.scheme or not parts.netloc:
+        return url  # relative URL — already origin-agnostic, resolved by the browser
+
+    scheme, host = origin
+    if parts.scheme == "https" and scheme != "https":
+        scheme = "https"  # never downgrade a TLS base to cleartext
+    if parts.scheme == scheme and parts.netloc.lower() == host.lower():
+        return url  # same origin → return the original string byte for byte
+    return urlunsplit((scheme, host, parts.path, parts.query, parts.fragment))
+
+
+def _resolve_playback_url(
+    channel: Channel | None,
+    stream_key: str | None,
+    request: Request | None = None,
+) -> str | None:
     """Build the HLS URL using the channel's assigned Flussonic node.
 
     Priority:
@@ -54,18 +118,39 @@ def _resolve_playback_url(channel: Channel | None, stream_key: str | None) -> st
       2. channel.source_url (stored fallback — full URL from import)
       3. None → frontend shows error
     Flussonic credentials are never included in the returned URL.
+
+    The player is served from several domains, so the ORIGIN of the result is
+    taken from the request (allowlisted — see _request_origin) while the PATH
+    configured in the node base_url is preserved. Without a request, an empty
+    allowlist or an unlisted Host the fixed base_url is used, unchanged.
     """
     if channel is None:
         return None
 
     node_id = channel.flussonic_node or "ec-main"
     client = get_flussonic_node_client(node_id)
+    origin = _request_origin(request)
 
     if stream_key and client and client.is_configured:
         hls_path = channel.hls_path or "index.m3u8"
-        return client.stream_hls_url(stream_key, hls_path)
+        return _rewrite_origin(client.stream_hls_url(stream_key, hls_path), origin)
 
-    return channel.source_url
+    # source_url is a stored, complete URL, so it gets a STRICTER rule: rewrite it
+    # only when its current host is itself allowlisted (an origin we own).
+    #   - relative ("/stream/co-main/X/index.m3u8" — the importer's default target,
+    #     CHANNEL_SOURCE_URL_MODE=relative) has no origin at all: the browser
+    #     resolves it against the page, so it already works on every domain.
+    #   - legacy direct-origin values ("http://181.78.246.211:8002/...") point at a
+    #     real third-party origin with its own path layout; grafting our domain onto
+    #     them would yield a URL nginx cannot serve — a 404 replacing a working
+    #     fallback — so they are left exactly as stored.
+    #   - only an absolute same-origin value ("https://nexoraplay.net/stream/...")
+    #     names an origin we control, and it is the single shape that breaks when
+    #     the page is served from a second domain, so it is the only one swapped.
+    src = channel.source_url
+    if src and urlsplit(src).netloc.lower() in settings.playback_allowed_hosts:
+        return _rewrite_origin(src, origin)
+    return src
 
 
 @router.post("/authorize", response_model=PlaybackResponse)
@@ -114,7 +199,7 @@ async def authorize_playback(
     await metrics.record_playback_success()
     await db.commit()
 
-    base_url = _resolve_playback_url(ch, stream_key)
+    base_url = _resolve_playback_url(ch, stream_key, request)
     return PlaybackResponse(
         token=result.token,
         expires_in=result.expires_in,
@@ -157,7 +242,7 @@ async def reissue_playback_token(
         ip=_get_ip(request),
     )
 
-    base_url = _resolve_playback_url(ch, ch.stream_key)
+    base_url = _resolve_playback_url(ch, ch.stream_key, request)
     return PlaybackResponse(
         token=result.token,
         expires_in=result.expires_in,

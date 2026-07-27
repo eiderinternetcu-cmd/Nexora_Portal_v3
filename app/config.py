@@ -101,6 +101,21 @@ class Settings(BaseSettings):
     flussonic_ec_quito_user: str = ""
     flussonic_ec_quito_password: str = ""
 
+    # Multi-domain playback. The web player is served from several domains
+    # (nexoraplay.net, tvdigital.laredtelco.com, …) while flussonic_*_base_url
+    # holds a single fixed origin, so from a second domain the HLS request would
+    # cross origin and the browser blocks it. The playback_url origin is
+    # therefore derived from the incoming request — but the Host header is
+    # CLIENT-CONTROLLED, so it may only SELECT an entry from this allowlist and
+    # the emitted origin is the CONFIGURED entry, never the raw header (Host
+    # header injection would otherwise point a subscriber's stream — and its
+    # playback token — at an attacker's domain).
+    # Comma-separated hostnames, matched case-insensitively; an entry may carry
+    # a port ("host:8443"). Empty (default) = feature OFF: playback_url is byte
+    # identical to the pre-multidomain behavior. A host that is not listed also
+    # falls back to the fixed base.
+    playback_host_allowlist: str = ""
+
     # Management API base URLs (health/list). In prod the *_base_url above are the
     # same-origin /stream/* paths (gated by auth_request), which the management API
     # can't be reached through — set these to the REAL Flussonic origin so node
@@ -108,6 +123,20 @@ class Settings(BaseSettings):
     flussonic_mgmt_base_url: str = ""
     flussonic_co_main_mgmt_base_url: str = ""
     flussonic_ec_quito_mgmt_base_url: str = ""
+
+    @property
+    def playback_allowed_hosts(self) -> dict[str, str]:
+        """{lowercased host → configured host} for PLAYBACK_HOST_ALLOWLIST.
+
+        Lookup table used to match an incoming Host against the allowlist while
+        emitting the operator-configured spelling (never the client's bytes).
+        """
+        out: dict[str, str] = {}
+        for raw in self.playback_host_allowlist.split(","):
+            host = raw.strip()
+            if host:
+                out.setdefault(host.lower(), host)
+        return out
 
     @property
     def database_url(self) -> str:
