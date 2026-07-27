@@ -22,11 +22,14 @@ async def list_subscribers(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     status: SubscriberStatus | None = Query(None),
+    q: str | None = Query(
+        None, max_length=128, description="Busca en username, full_name, email e id_cedula"
+    ),
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_admin_or_reseller),
 ):
     svc = SubscriberService(db)
-    subs, total = await svc.list_subscribers(page, page_size, status)
+    subs, total = await svc.list_subscribers(page, page_size, status, q=q)
     pages = (total + page_size - 1) // page_size
     return PaginatedResponse(data=subs, total=total, page=page, page_size=page_size, pages=pages)
 

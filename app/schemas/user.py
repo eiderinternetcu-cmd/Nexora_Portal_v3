@@ -26,6 +26,16 @@ class UserPasswordChange(BaseModel):
     new_password: str = Field(..., min_length=8, max_length=128)
 
 
+class UserPasswordSet(BaseModel):
+    """Reposicion hecha por un admin: no se pide la contrasena actual porque el
+    caso de uso es justamente que el usuario la ha perdido. Se mantiene el
+    minimo de 8 de UserCreate/UserPasswordChange para no abrir un atajo por el
+    que un admin pueda dejar una clave mas debil de lo que el propio usuario
+    puede ponerse."""
+
+    new_password: str = Field(..., min_length=8, max_length=128)
+
+
 class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

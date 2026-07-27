@@ -1,12 +1,29 @@
 import uuid
 import secrets
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_
 
 from app.models.subscriber import Subscriber, SubscriberStatus
 from app.core.security import hash_password
 from app.core.exceptions import not_found, already_exists, bad_request
 from app.schemas.subscriber import SubscriberCreate, SubscriberUpdate
+
+# Caracter de escape para los patrones LIKE/ILIKE. En Python "\\" es UNA barra.
+LIKE_ESCAPE = "\\"
+
+
+def escape_like(term: str) -> str:
+    """Neutraliza los comodines de LIKE en texto tecleado por el usuario.
+
+    Sin esto, un admin que escriba `%` en el buscador no filtraria nada: el
+    patron pasaria a ser `%%%` y devolveria la tabla entera. Se escapa tambien
+    la propia barra para que `\\` se busque como literal.
+    """
+    return (
+        term.replace(LIKE_ESCAPE, LIKE_ESCAPE * 2)
+        .replace("%", LIKE_ESCAPE + "%")
+        .replace("_", LIKE_ESCAPE + "_")
+    )
 
 
 class SubscriberService:
@@ -35,14 +52,34 @@ class SubscriberService:
         page: int = 1,
         page_size: int = 50,
         status: SubscriberStatus | None = None,
+        q: str | None = None,
     ) -> tuple[list[Subscriber], int]:
         query = select(Subscriber)
         count_query = select(func.count()).select_from(Subscriber)
         if status:
             query = query.where(Subscriber.status == status)
             count_query = count_query.where(Subscriber.status == status)
+        if q and q.strip():
+            # Busqueda libre del panel: username, nombre, email y cedula.
+            pattern = f"%{escape_like(q.strip())}%"
+            search = or_(
+                Subscriber.username.ilike(pattern, escape=LIKE_ESCAPE),
+                Subscriber.full_name.ilike(pattern, escape=LIKE_ESCAPE),
+                Subscriber.email.ilike(pattern, escape=LIKE_ESCAPE),
+                Subscriber.id_cedula.ilike(pattern, escape=LIKE_ESCAPE),
+            )
+            query = query.where(search)
+            count_query = count_query.where(search)
         offset = (page - 1) * page_size
-        query = query.offset(offset).limit(page_size)
+        # ORDER BY determinista: sin el, Postgres no garantiza orden entre
+        # consultas y con offset/limit una misma fila puede salir dos veces en la
+        # pagina 2 y nunca en la 1. El id desempata cuando dos filas comparten
+        # created_at, que es lo que hace el orden ESTABLE y no solo "ordenado".
+        query = (
+            query.order_by(Subscriber.created_at.desc(), Subscriber.id)
+            .offset(offset)
+            .limit(page_size)
+        )
         result = await self.db.execute(query)
         total = (await self.db.execute(count_query)).scalar_one()
         return list(result.scalars().all()), total
