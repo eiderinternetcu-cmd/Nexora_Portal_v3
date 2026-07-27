@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Ban, CheckCircle2, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Ban, CheckCircle2, Download, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
 
 import { messageForError } from "../../api/errors";
 import { SUBSCRIBER_STATUSES } from "../../api/types";
-import type { Subscriber, SubscriberStatus } from "../../api/types";
-import { useApi } from "../../auth/AuthContext";
+import type { Plan, Subscriber, SubscriberStatus } from "../../api/types";
+import { useApi, useAuth } from "../../auth/AuthContext";
 import {
   Button,
   ConfirmDialog,
@@ -28,6 +28,36 @@ const RETARDO_BUSQUEDA_MS = 350;
 
 type FiltroEstado = SubscriberStatus | "";
 
+/** Fecha local de hoy (YYYY-MM-DD) para nombrar el CSV. Sale del reloj real. */
+const fechaHoy = () => {
+  const hoy = new Date();
+  const anio = hoy.getFullYear();
+  const mes = String(hoy.getMonth() + 1).padStart(2, "0");
+  const dia = String(hoy.getDate()).padStart(2, "0");
+  return `${anio}-${mes}-${dia}`;
+};
+
+/**
+ * Celda "Caduca": fecha de fin de suscripcion mas los dias restantes. Los cuatro
+ * campos de enriquecimiento son opcionales mientras el backend viejo no los
+ * devuelve, asi que un days_remaining ausente se trata como "sin suscripcion".
+ */
+const renderCaduca = (fila: Subscriber) => {
+  const dias = fila.days_remaining;
+  if (dias === null || dias === undefined) {
+    return <span className="susc-caduca-sin">sin suscripcion</span>;
+  }
+  const vencido = dias <= 0;
+  return (
+    <div className="susc-dato">
+      <span className={vencido ? "susc-caduca-vencido" : "susc-dato-valor"}>
+        {formatFecha(fila.subscription_expires_at)}
+      </span>
+      <span className="susc-dato-label">{vencido ? "vencido" : `${dias} dias`}</span>
+    </div>
+  );
+};
+
 /**
  * Listado de suscriptores.
  *
@@ -40,6 +70,7 @@ type FiltroEstado = SubscriberStatus | "";
  */
 export function SuscriptoresView() {
   const api = useApi();
+  const { isAdmin } = useAuth();
   const toast = useToast();
   const navigate = useNavigate();
 
@@ -49,6 +80,12 @@ export function SuscriptoresView() {
   const [pagina, setPagina] = useState(1);
   const [tamano, setTamano] = useState(50);
   const [estado, setEstado] = useState<FiltroEstado>("");
+  // Filtro de plan: hoy es de CLIENTE sobre la pagina cargada (el servidor aun
+  // no acepta un parametro de plan). El valor es el nombre del plan, que es lo
+  // que trae Subscriber.plan_name.
+  const [filtroPlan, setFiltroPlan] = useState("");
+  const [planes, setPlanes] = useState<Plan[]>([]);
+  const [exportando, setExportando] = useState(false);
   /** Lo que se esta escribiendo. */
   const [busqueda, setBusqueda] = useState("");
   /** Lo que ya se ha mandado a la API (busqueda con retardo aplicado). */
@@ -107,7 +144,53 @@ export function SuscriptoresView() {
     return () => window.clearTimeout(temporizador);
   }, [busqueda]);
 
+  // Planes para el desplegable de filtro. Se cargan una vez; si falla, el
+  // desplegable queda solo con "Todos" y el resto de la pantalla sigue viva.
+  useEffect(() => {
+    let vivo = true;
+    api
+      .listPlans()
+      .then((respuesta) => {
+        if (vivo) setPlanes(respuesta.data ?? []);
+      })
+      .catch(() => {
+        if (vivo) setPlanes([]);
+      });
+    return () => {
+      vivo = false;
+    };
+  }, [api]);
+
   const buscando = busqueda.trim() !== consulta;
+
+  // Filtro de plan aplicado en cliente sobre la pagina ya cargada.
+  const filasVisibles = filtroPlan
+    ? filas.filter((fila) => fila.plan_name === filtroPlan)
+    : filas;
+
+  const exportarCsv = async () => {
+    setExportando(true);
+    try {
+      // El export respeta los filtros de servidor activos (estado y busqueda).
+      const blob = await api.exportSubscribersCsv({
+        status: estado || undefined,
+        q: consulta || undefined,
+      });
+      const url = URL.createObjectURL(blob);
+      const enlace = document.createElement("a");
+      enlace.href = url;
+      enlace.download = `suscriptores-${fechaHoy()}.csv`;
+      document.body.appendChild(enlace);
+      enlace.click();
+      enlace.remove();
+      URL.revokeObjectURL(url);
+      toast.success("Exportacion generada.");
+    } catch (err) {
+      toast.error(messageForError(err));
+    } finally {
+      setExportando(false);
+    }
+  };
 
   const cambiarEstado = (valor: FiltroEstado) => {
     setEstado(valor);
@@ -192,6 +275,30 @@ export function SuscriptoresView() {
       ),
     },
     {
+      key: "caduca",
+      header: "Caduca",
+      width: "140px",
+      render: (fila) => renderCaduca(fila),
+    },
+    {
+      key: "plan",
+      header: "Plan",
+      width: "12%",
+      render: (fila) => textoOpcional(fila.plan_name),
+    },
+    // La columna Distribuidor solo tiene sentido para un admin: un reseller solo
+    // recibe SUS suscriptores, asi que veria su propio nombre repetido.
+    ...(isAdmin
+      ? [
+          {
+            key: "distribuidor",
+            header: "Distribuidor",
+            width: "12%",
+            render: (fila: Subscriber) => textoOpcional(fila.owner_username),
+          } satisfies Column<Subscriber>,
+        ]
+      : []),
+    {
       key: "alta",
       header: "Alta",
       width: "12%",
@@ -271,6 +378,14 @@ export function SuscriptoresView() {
             Recargar
           </Button>
           <Button
+            variant="secondary"
+            icon={<Download size={16} />}
+            onClick={() => void exportarCsv()}
+            loading={exportando}
+          >
+            Exportar CSV
+          </Button>
+          <Button
             variant="primary"
             icon={<Plus size={16} />}
             onClick={() => {
@@ -315,6 +430,23 @@ export function SuscriptoresView() {
           </Select>
         </div>
         <div className="susc-toolbar-field">
+          <label className="susc-toolbar-label" htmlFor="susc-plan">
+            Plan
+          </label>
+          <Select
+            id="susc-plan"
+            value={filtroPlan}
+            onChange={(evento) => setFiltroPlan(evento.target.value)}
+          >
+            <option value="">Todos</option>
+            {planes.map((plan) => (
+              <option key={plan.id} value={plan.name}>
+                {plan.name}
+              </option>
+            ))}
+          </Select>
+        </div>
+        <div className="susc-toolbar-field">
           <label className="susc-toolbar-label" htmlFor="susc-tamano">
             Por pagina
           </label>
@@ -335,20 +467,29 @@ export function SuscriptoresView() {
           <strong> todos</strong> los suscriptores por usuario, nombre, email y cedula.
           El telefono no entra en la busqueda del servidor.
         </p>
+        {filtroPlan ? (
+          <p className="susc-toolbar-hint">
+            El filtro de plan se aplica <strong>solo a la pagina cargada</strong> (el
+            servidor todavia no filtra por plan): {filasVisibles.length} de {filas.length}
+            {" "}en esta pagina. Para ver todos los de un plan, sube el tamano de pagina.
+          </p>
+        ) : null}
       </div>
 
       <DataTable
         columns={columnas}
-        rows={filas}
+        rows={filasVisibles}
         rowKey={(fila) => fila.id}
         loading={cargando}
         error={error}
         onRetry={() => void cargar()}
         caption="Suscriptores"
         emptyMessage={
-          consulta
-            ? `Ningun suscriptor coincide con "${consulta}".`
-            : "No hay suscriptores con estos filtros."
+          filtroPlan
+            ? `Ningun suscriptor de esta pagina usa el plan "${filtroPlan}".`
+            : consulta
+              ? `Ningun suscriptor coincide con "${consulta}".`
+              : "No hay suscriptores con estos filtros."
         }
         onRowClick={(fila) => navigate(`/suscriptores/${fila.id}`)}
         footer={

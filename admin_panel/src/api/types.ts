@@ -174,6 +174,19 @@ export type Subscriber = {
   notes: string | null;
   created_at: string;
   updated_at: string;
+  /**
+   * Enriquecimiento de reseller que anade el backend en paralelo. OPCIONALES a
+   * proposito (string|number|null|undefined): un panel compilado contra el
+   * backend viejo, que aun no los devuelve, no debe romperse. Cuando llegan:
+   *   - subscription_expires_at: fin de la suscripcion vigente (ISO) o null.
+   *   - plan_name: nombre del plan vigente o null.
+   *   - days_remaining: dias que quedan; <= 0 es vencido; null sin suscripcion.
+   *   - owner_username: distribuidor (reseller) dueno; solo util para un admin.
+   */
+  subscription_expires_at?: string | null;
+  plan_name?: string | null;
+  days_remaining?: number | null;
+  owner_username?: string | null;
 };
 
 /** `SubscriberOutFull` — el detalle y la creacion anaden estos dos campos. */

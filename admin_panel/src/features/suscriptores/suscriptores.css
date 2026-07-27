@@ -163,6 +163,19 @@
   font-size: 13px;
 }
 
+/* Celda "Caduca": vencido en rojo, sin suscripcion atenuado. */
+.susc-caduca-vencido {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
+
+.susc-caduca-sin {
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
 .susc-form {
   display: flex;
   flex-direction: column;

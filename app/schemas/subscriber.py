@@ -42,6 +42,15 @@ class SubscriberOut(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+    # Enriquecimiento del panel (join con la suscripcion ACTIVA + su plan + owner).
+    # Tienen default None para que model_validate() sobre un Subscriber sin estos
+    # atributos calculados (p.ej. la respuesta de create/update) no falle: el
+    # listado y el detalle los rellenan, el resto los deja en null. Aditivo.
+    subscription_expires_at: datetime | None = None
+    plan_name: str | None = None
+    days_remaining: int | None = None
+    owner_username: str | None = None
+
 
 class SubscriberOutFull(SubscriberOut):
     activation_code: str | None

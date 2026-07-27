@@ -1,9 +1,13 @@
 import uuid
 import secrets
+from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, or_
+from sqlalchemy import select, func, or_, true
 
 from app.models.subscriber import Subscriber, SubscriberStatus
+from app.models.subscription import Subscription
+from app.models.plan import Plan
+from app.models.user import User
 from app.core.security import hash_password
 from app.core.exceptions import not_found, already_exists, bad_request
 from app.schemas.subscriber import SubscriberCreate, SubscriberUpdate
@@ -30,12 +34,71 @@ class SubscriberService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def get_by_id(self, sub_id: uuid.UUID) -> Subscriber:
-        result = await self.db.execute(select(Subscriber).where(Subscriber.id == sub_id))
-        sub = result.scalar_one_or_none()
-        if not sub:
-            raise not_found("Subscriber")
+    def _enriched_select(self):
+        """SELECT que trae cada suscriptor junto a su suscripcion ACTIVA, el
+        nombre del plan y el username del owner en UNA sola consulta (sin N+1).
+
+        La suscripcion activa se resuelve con un LEFT JOIN LATERAL limitado a 1
+        fila (la de mayor expires_at). El LATERAL con LIMIT 1 garantiza como
+        maximo una fila por suscriptor, asi que el join NO multiplica filas y no
+        rompe la paginacion aunque un suscriptor tuviera varias suscripciones
+        marcadas is_active.
+        """
+        active = (
+            select(
+                Subscription.expires_at.label("expires_at"),
+                Subscription.plan_id.label("plan_id"),
+            )
+            .where(
+                Subscription.subscriber_id == Subscriber.id,
+                Subscription.is_active.is_(True),
+            )
+            .order_by(Subscription.expires_at.desc())
+            .limit(1)
+            .lateral("active_sub")
+        )
+        return (
+            select(
+                Subscriber,
+                active.c.expires_at,
+                Plan.name,
+                User.username,
+            )
+            .select_from(Subscriber)
+            .outerjoin(active, true())
+            .outerjoin(Plan, Plan.id == active.c.plan_id)
+            .outerjoin(User, User.id == Subscriber.created_by)
+        )
+
+    @staticmethod
+    def _enrich(row) -> Subscriber:
+        """Adjunta los campos calculados del panel a la instancia Subscriber.
+
+        Son atributos de instancia (no columnas mapeadas); SubscriberOut los lee
+        via from_attributes.
+        """
+        sub, expires_at, plan_name, owner_username = row
+        sub.subscription_expires_at = expires_at
+        sub.plan_name = plan_name
+        sub.owner_username = owner_username
+        if expires_at is not None:
+            now = datetime.now(timezone.utc)
+            sub.days_remaining = (expires_at - now).days
+        else:
+            sub.days_remaining = None
         return sub
+
+    async def get_by_id(self, sub_id: uuid.UUID, owner_id: uuid.UUID | None = None) -> Subscriber:
+        """Devuelve el suscriptor enriquecido. Si `owner_id` viene (reseller), se
+        restringe a los suyos: un suscriptor ajeno se trata como INEXISTENTE
+        (404), sin filtrar su existencia."""
+        query = self._enriched_select().where(Subscriber.id == sub_id)
+        if owner_id is not None:
+            query = query.where(Subscriber.created_by == owner_id)
+        row = (await self.db.execute(query)).first()
+        if not row:
+            raise not_found("Subscriber")
+        return self._enrich(row)
 
     async def get_by_username(self, username: str) -> Subscriber | None:
         result = await self.db.execute(select(Subscriber).where(Subscriber.username == username))
@@ -47,15 +110,14 @@ class SubscriberService:
         )
         return result.scalar_one_or_none()
 
-    async def list_subscribers(
+    def _apply_filters(
         self,
-        page: int = 1,
-        page_size: int = 50,
-        status: SubscriberStatus | None = None,
-        q: str | None = None,
-    ) -> tuple[list[Subscriber], int]:
-        query = select(Subscriber)
-        count_query = select(func.count()).select_from(Subscriber)
+        query,
+        count_query,
+        status: SubscriberStatus | None,
+        q: str | None,
+        owner_id: uuid.UUID | None,
+    ):
         if status:
             query = query.where(Subscriber.status == status)
             count_query = count_query.where(Subscriber.status == status)
@@ -70,6 +132,24 @@ class SubscriberService:
             )
             query = query.where(search)
             count_query = count_query.where(search)
+        if owner_id is not None:
+            # Scoping de reseller: solo los suscriptores que creo. Un reseller no
+            # llega ni a saber que existen los ajenos.
+            query = query.where(Subscriber.created_by == owner_id)
+            count_query = count_query.where(Subscriber.created_by == owner_id)
+        return query, count_query
+
+    async def list_subscribers(
+        self,
+        page: int = 1,
+        page_size: int = 50,
+        status: SubscriberStatus | None = None,
+        q: str | None = None,
+        owner_id: uuid.UUID | None = None,
+    ) -> tuple[list[Subscriber], int]:
+        query = self._enriched_select()
+        count_query = select(func.count()).select_from(Subscriber)
+        query, count_query = self._apply_filters(query, count_query, status, q, owner_id)
         offset = (page - 1) * page_size
         # ORDER BY determinista: sin el, Postgres no garantiza orden entre
         # consultas y con offset/limit una misma fila puede salir dos veces en la
@@ -80,9 +160,25 @@ class SubscriberService:
             .offset(offset)
             .limit(page_size)
         )
-        result = await self.db.execute(query)
+        rows = (await self.db.execute(query)).all()
         total = (await self.db.execute(count_query)).scalar_one()
-        return list(result.scalars().all()), total
+        return [self._enrich(r) for r in rows], total
+
+    async def list_for_export(
+        self,
+        status: SubscriberStatus | None = None,
+        q: str | None = None,
+        owner_id: uuid.UUID | None = None,
+    ) -> list[Subscriber]:
+        """Todos los suscriptores (sin paginar) que casan con los filtros y el
+        scoping, para el export CSV. Mismo enriquecimiento y mismo orden que el
+        listado."""
+        query = self._enriched_select()
+        count_query = select(func.count()).select_from(Subscriber)
+        query, _ = self._apply_filters(query, count_query, status, q, owner_id)
+        query = query.order_by(Subscriber.created_at.desc(), Subscriber.id)
+        rows = (await self.db.execute(query)).all()
+        return [self._enrich(r) for r in rows]
 
     async def create(self, data: SubscriberCreate, created_by: uuid.UUID | None = None) -> Subscriber:
         if await self.get_by_username(data.username):
@@ -108,25 +204,31 @@ class SubscriberService:
         await self.db.flush()
         return sub
 
-    async def update(self, sub_id: uuid.UUID, data: SubscriberUpdate) -> Subscriber:
-        sub = await self.get_by_id(sub_id)
+    async def update(
+        self, sub_id: uuid.UUID, data: SubscriberUpdate, owner_id: uuid.UUID | None = None
+    ) -> Subscriber:
+        sub = await self.get_by_id(sub_id, owner_id=owner_id)
         for field, value in data.model_dump(exclude_none=True).items():
             setattr(sub, field, value)
         await self.db.flush()
         return sub
 
-    async def set_password(self, sub_id: uuid.UUID, new_password: str) -> None:
-        sub = await self.get_by_id(sub_id)
+    async def set_password(
+        self, sub_id: uuid.UUID, new_password: str, owner_id: uuid.UUID | None = None
+    ) -> None:
+        sub = await self.get_by_id(sub_id, owner_id=owner_id)
         sub.password_hash = hash_password(new_password)
         await self.db.flush()
 
-    async def set_status(self, sub_id: uuid.UUID, status: SubscriberStatus) -> Subscriber:
-        sub = await self.get_by_id(sub_id)
+    async def set_status(
+        self, sub_id: uuid.UUID, status: SubscriberStatus, owner_id: uuid.UUID | None = None
+    ) -> Subscriber:
+        sub = await self.get_by_id(sub_id, owner_id=owner_id)
         sub.status = status
         await self.db.flush()
         return sub
 
-    async def delete(self, sub_id: uuid.UUID) -> None:
-        sub = await self.get_by_id(sub_id)
+    async def delete(self, sub_id: uuid.UUID, owner_id: uuid.UUID | None = None) -> None:
+        sub = await self.get_by_id(sub_id, owner_id=owner_id)
         await self.db.delete(sub)
         await self.db.flush()

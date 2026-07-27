@@ -280,6 +280,46 @@ export class AdminClient {
     return this.del<MessageResponse>(`/subscribers/${encodeURIComponent(subId)}`);
   }
 
+  /**
+   * GET /subscribers/export -> text/csv (attachment).
+   *
+   * Devuelve el Blob CRUDO, no JSON: los escape hatches genericos parsean el
+   * cuerpo como JSON y aqui necesitamos el fichero tal cual. Reutiliza el
+   * refresco preventivo y el header de auth del resto del cliente; respeta los
+   * filtros activos (status, q) igual que el listado. La descarga en el
+   * navegador la dispara la pantalla, no este metodo.
+   */
+  async exportSubscribersCsv(query: SubscriberListQuery = {}): Promise<Blob> {
+    try {
+      await this.ensureFreshAccessToken();
+    } catch {
+      this.failSession();
+    }
+    const session = this.store.load();
+    if (!session) this.failSession();
+
+    const headers = new Headers();
+    headers.set("Accept", "text/csv");
+    if (session.accessToken) {
+      headers.set("Authorization", `Bearer ${session.accessToken}`);
+    }
+
+    const url = `${this.config.apiBaseUrl}${this.config.apiPrefix}/subscribers/export${buildQuery(query)}`;
+    const response = await fetch(url, { headers });
+
+    if (response.status === 401) this.failSession();
+    if (!response.ok) {
+      const text = await response.text();
+      const payload = text ? safeJson(text) : undefined;
+      throw new ApiError(
+        response.status,
+        extractApiMessage(payload, response.statusText),
+        payload,
+      );
+    }
+    return response.blob();
+  }
+
   // -------------------------------------------------------------------------
   // Planes
   // -------------------------------------------------------------------------
