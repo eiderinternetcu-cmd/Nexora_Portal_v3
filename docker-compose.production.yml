@@ -9,7 +9,16 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ./deploy/nginx/nexoraplay.conf:/etc/nginx/conf.d/default.conf:ro
+      # Se monta el DIRECTORIO conf.d, no un archivo suelto. Antes esto era
+      # `./deploy/nginx/nexoraplay.conf:/etc/nginx/conf.d/default.conf:ro`, que
+      # hacía imposible cargar un vhost adicional: nginx solo veía ese archivo.
+      # Montar el directorio también tapa el default.conf de fábrica de la
+      # imagen; el catch-all lo aporta conf.d/00-default-server.conf.
+      - ./deploy/nginx/conf.d:/etc/nginx/conf.d:ro
+      # snippets/ va FUERA de conf.d a propósito: nginx auto-incluye
+      # conf.d/*.conf, y estos fragmentos son trozos de server{} que no parsean
+      # en scope http{}. Ver deploy/nginx/README.md.
+      - ./deploy/nginx/snippets:/etc/nginx/snippets:ro
       - /etc/letsencrypt:/etc/letsencrypt:ro
       - /var/www/certbot:/var/www/certbot:ro
     networks:
