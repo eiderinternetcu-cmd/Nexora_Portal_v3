@@ -466,6 +466,48 @@ estaban inactivos.
 
 ---
 
+## Revisión de la cabecera (2026-07-27, 05:15)
+
+| | |
+|---|---|
+| `cpu_usage` | **74 %** — era 61 % antes de montar los transcodificadores |
+| `memory_usage` | 36 % |
+| Streams | 43 vivos · 35 desactivados · **5 caídos** — de 83 |
+| Entrada / salida | 183,9 / **191,9 Mbps** (era 155 / 167) |
+| Uptime | **3 h** |
+
+**El salto de CPU es nuestro.** La salida subió 25 Mbps porque ahora la cabecera alimenta
+nueve flujos más: seis transcodificadores en el edge y tres en la torre. Sigue habiendo
+margen, pero 74 % ya no es holgado — a partir de aquí, el cuello de botella para añadir
+canales deja de ser la CPU de transcodificación y pasa a ser la cabecera.
+
+**Flussonic se reinició sobre las 02:00** y no fue por nuestros cambios: el primero se
+aplicó a las 03:15, más de una hora después. Conviene averiguar qué lo reinició, porque ese
+corte se lleva por delante la señal del FTTH.
+
+**Cuatro streams nuevos desde el volcado anterior**: `AE_MUNDO`, `SONY_CHANNEL`, `LIFETIME`
+—los tres ya dados de alta— y **`HISTORY_2`**, que no está en el catálogo. Alguien más
+trabaja sobre esa cabecera. `HISTORY_2` es H.264 1280x720 y arranca en keyframe: entraría
+**directo, sin transcodificar**.
+
+### UBE TV: la fuente está caída, no el canal
+
+`UBE_Tv` apunta a `srt://187.251.170.35:10030` y lleva **276 intentos fallidos**. Dos avisos
+sobre cómo comprobarlo:
+
+- **SRT va sobre UDP.** Probar el puerto por TCP no demuestra nada, y el ping suele estar
+  bloqueado. La única prueba que vale es que **Flussonic**, que sí habla SRT, no consigue
+  conectar.
+- **La API de Astra exige autenticación** (`403` en `/control/` y `/api/status`). Su config
+  declara un único usuario, `admin`, con la contraseña cifrada — no está en el `.env` ni en
+  ningún sitio del repo. Sin ella no se puede consultar en vivo si un canal apareció en la
+  parrilla satelital.
+
+Queda inactivo en el catálogo hasta tener fuente: con la fuente caída, un suscriptor que lo
+pulse ve un canal roto. Reactivarlo es un `UPDATE`.
+
+---
+
 ## Pendiente después de esto
 
 - **Los 13 canales de TelecoWR que faltan.** Entre el edge (~1,8 núcleos libres) y la torre
@@ -478,7 +520,12 @@ estaban inactivos.
   alerta de nodo caído que ya estaba pendiente.
 - **Versionar `nexoraplay.conf`** (PR #9). El bloque `tc-main` ya tiene copia en
   `deploy/transcode/`, pero el fichero vivo del edge sigue existiendo solo en el servidor.
-- **Los 5 streams caídos que quedan** en la cabecera (TUDN, WARNER, PASSION,
-  MAKRODIGITAL_TV, UBE_Tv): repararlos contra Astra o desactivarlos.
+- **`HISTORY_2`**: verificado como reproducible directo. Solo falta darlo de alta (sería el
+  canal 50) y concederlo en los dos planes.
+- **`UBE_Tv`**: necesita fuente. Requiere la contraseña de `admin` de Astra para buscarlo en
+  el satélite, o una URL nueva del proveedor SRT.
+- **Averiguar qué reinició Flussonic** a las 02:00 del 2026-07-27.
+- **Vigilar el `cpu_usage` de la cabecera**, ya en 74 %: es el nuevo límite para añadir
+  canales, por encima de la capacidad de transcodificación.
 - Y lo de siempre, que esto no cambia: **corregir el GOP en origen sigue siendo gratis**.
   Si TelecoWR acepta, sus 18 canales dejan de necesitar transcodificación.
