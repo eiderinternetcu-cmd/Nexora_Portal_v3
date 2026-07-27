@@ -39,61 +39,61 @@ const posters: Poster[] = [
   {
     title: "Interstellar",
     meta: "2014 - Sci-Fi",
-    image: "https://image.tmdb.org/t/p/w500/gEU2QniE6E77NI6lCU6MxlNBvIe.jpg",
+    image: "/assets/posters/interstellar.jpg",
     bg: "linear-gradient(160deg,#0a1a3a,#1a3060)",
   },
   {
     title: "Dune: Part One",
     meta: "2021 - Sci-Fi",
-    image: "https://image.tmdb.org/t/p/w500/d5NXSklpcKDIyjpyTi0Yn0IQWEA.jpg",
+    image: "/assets/posters/dune-1.jpg",
     bg: "linear-gradient(160deg,#2a1400,#5a2e00)",
   },
   {
     title: "Oppenheimer",
     meta: "2023 - Drama",
-    image: "https://image.tmdb.org/t/p/w500/8Gxv8gSFCU0XGDykEGv7zR1n2ua.jpg",
+    image: "/assets/posters/oppenheimer.jpg",
     bg: "linear-gradient(160deg,#1a0800,#4a1500)",
   },
   {
     title: "Avatar 2",
     meta: "2022 - Accion",
-    image: "https://image.tmdb.org/t/p/w500/t6HIqrRAclMCA60NsSmeqe9RmIE.jpg",
+    image: "/assets/posters/avatar-2.jpg",
     bg: "linear-gradient(160deg,#001a2a,#004060)",
   },
   {
     title: "The Batman",
     meta: "2022 - Accion",
-    image: "https://image.tmdb.org/t/p/w500/74xTEgt7R36Fpooo50r9T25onhq.jpg",
+    image: "/assets/posters/batman.jpg",
     bg: "linear-gradient(160deg,#0a0a18,#1a1a35)",
   },
   {
     title: "Spider-Man: NWH",
     meta: "2021 - Accion",
-    image: "https://image.tmdb.org/t/p/w500/1g0dhYtq4irTY1GPXvft6k4YLjm.jpg",
+    image: "/assets/posters/spiderman-nwh.jpg",
     bg: "linear-gradient(160deg,#0d1a10,#1a3520)",
   },
   {
     title: "Top Gun: Maverick",
     meta: "2022 - Accion",
-    image: "https://image.tmdb.org/t/p/w500/62HCnUTziyWcpDaBO2i1DX17ljH.jpg",
+    image: "/assets/posters/top-gun.jpg",
     bg: "linear-gradient(160deg,#0a1520,#0a2a40)",
   },
   {
     title: "Dune: Part Two",
     meta: "2024 - Sci-Fi",
-    image: "https://image.tmdb.org/t/p/w500/cdqLnri3NEGcmfnqwk2TSIYtddg.jpg",
+    image: "/assets/posters/dune-2.jpg",
     bg: "linear-gradient(160deg,#1a1000,#3a2800)",
   },
   {
     title: "Barbie",
     meta: "2023 - Comedia",
-    image: "https://image.tmdb.org/t/p/w500/iuFNMS8U5cb6xfzi51Dbkovj7vM.jpg",
+    image: "/assets/posters/barbie.jpg",
     bg: "linear-gradient(160deg,#5a0040,#cc0088)",
   },
   {
     title: "Gladiator II",
     meta: "2024 - Accion",
-    image: "https://image.tmdb.org/t/p/w500/2cxhvwyE0RwinBZ3LMnGMPKWMFj.jpg",
+    image: "/assets/posters/gladiator-2.jpg",
     bg: "linear-gradient(160deg,#1a0505,#3a0f0f)",
   },
 ];
@@ -176,7 +176,18 @@ export function HomeView({
                 style={{ background: poster.bg }}
                 onClick={() => setActive((value) => (value === index ? null : index))}
               >
-                <img src={poster.image} alt={poster.title} />
+                <img
+                  src={poster.image}
+                  alt={poster.title}
+                  loading="lazy"
+                  // Si la imagen falla, se oculta y queda el degradado con el
+                  // titulo, que ya es legible. Sin esto el navegador pinta el
+                  // icono de imagen rota, que es justo lo que se veia cuando 4
+                  // de los 10 posters apuntaban a rutas de TMDB ya caducadas.
+                  onError={(event) => {
+                    event.currentTarget.style.display = "none";
+                  }}
+                />
                 <span className="launcher-card-tint" />
                 <span className="launcher-card-info">
                   <strong>{poster.title}</strong>
