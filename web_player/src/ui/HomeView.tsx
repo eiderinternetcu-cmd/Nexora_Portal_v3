@@ -16,6 +16,7 @@ import {
   Tv2,
 } from "lucide-react";
 import type { Channel, ClientProfile } from "../api/types";
+import { brand } from "../brand";
 
 type HomeViewProps = {
   profile: ClientProfile;
@@ -154,9 +155,9 @@ export function HomeView({
 
       <section className="launcher-top">
         <div className="launcher-logo">
-          <img src="/assets/player-logo.png" alt="" />
+          <img src={brand.assets.playerLogo} alt="" />
         </div>
-        <div className="launcher-brand">NEXORA</div>
+        <div className="launcher-brand">{brand.name}</div>
       </section>
 
       <section className="launcher-cards">
@@ -251,8 +252,8 @@ export function HomeView({
         </div>
 
         <div className="launcher-footer-bottom">
-          <div>NEXORA.IO</div>
-          <span>(C) 2026 Nexora - Todos los derechos reservados</span>
+          <div>{brand.displayDomain}</div>
+          <span>{brand.legal}</span>
         </div>
       </footer>
     </main>

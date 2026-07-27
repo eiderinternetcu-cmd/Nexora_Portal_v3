@@ -1,10 +1,15 @@
 <!doctype html>
-<html lang="es">
+<html lang="es" data-brand="nexora">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <!--
+      Valores por defecto = marca de fallback (nexora). En el arranque,
+      applyBrand() (src/brand) reescribe data-brand, title, theme-color y
+      favicon segun el hostname resuelto, antes del primer render.
+    -->
     <meta name="theme-color" content="#04030e" />
-    <link rel="icon" href="/assets/icon.png" />
+    <link rel="icon" href="/assets/nexora/icon.png" />
     <title>Nexora Web Player</title>
   </head>
   <body>

@@ -21,6 +21,7 @@ import type { AppConfig } from "../api/config";
 import { messageForError } from "../api/errors";
 import { NexoraClient } from "../api/nexoraClient";
 import type { Channel } from "../api/types";
+import { brand } from "../brand";
 import { buildCategories, channelsForCategory } from "../catalog/categories";
 import { HeartbeatRunner } from "../heartbeat/heartbeatRunner";
 import { HlsController } from "../player/hlsController";
@@ -404,10 +405,10 @@ export function PlayerView({
           <button className="pro-icon" type="button" aria-label="Volver al inicio" onClick={onExit}>
             <ChevronLeft size={20} />
           </button>
-          <button className="pro-brand" type="button" onClick={onExit} aria-label="NEXORA">
-            <img src="/assets/player-logo.png" alt="" />
+          <button className="pro-brand" type="button" onClick={onExit} aria-label={brand.name}>
+            <img src={brand.assets.playerLogo} alt="" />
             <span>
-              <strong>NEXORA</strong>
+              <strong>{brand.name}</strong>
               <small>Player Pro</small>
             </span>
           </button>
@@ -539,14 +540,14 @@ export function PlayerView({
         </aside>
 
         {!current && (
-          <section className="pro-placeholder" aria-label="NEXORA">
+          <section className="pro-placeholder" aria-label={brand.name}>
             <div className="pro-hero">
               <div className="pro-hero-mark">
-                <img src="/assets/player-logo.png" alt="" />
+                <img src={brand.assets.playerLogo} alt="" />
               </div>
               <div className="pro-hero-copy">
                 <div className="pro-hero-kicker">En Vivo</div>
-                <h1>NEXORA</h1>
+                <h1>{brand.name}</h1>
                 <p>Tu sala de mando para TV, VOD, karaoke y radio con una experiencia inmersiva de pantalla completa.</p>
                 <div className="pro-hero-actions">
                   <button type="button" className="primary" onClick={() => visibleChannels[0] && void playChannel(visibleChannels[0])}>
@@ -580,7 +581,7 @@ export function PlayerView({
           <div className="pro-np-left">
             <div className="pro-np-orb" />
             <div className="pro-np-info">
-              <strong>{current?.name ?? "NEXORA Player Pro"}</strong>
+              <strong>{current?.name ?? `${brand.name} Player Pro`}</strong>
               <small>
                 <span>En Vivo</span>
                 {status}

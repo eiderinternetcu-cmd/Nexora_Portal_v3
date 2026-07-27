@@ -1,6 +1,7 @@
 import { FormEvent, useMemo, useState } from "react";
 import { KeyRound, Lock, LogIn, UserRound } from "lucide-react";
 import { messageForError } from "../api/errors";
+import { brand } from "../brand";
 import { NexoraBrand } from "./NexoraBrand";
 
 type LoginViewProps = {
@@ -40,7 +41,7 @@ export function LoginView({ onLogin }: LoginViewProps) {
   return (
     <main className="screen auth-screen">
       <div className="bg-layer" />
-      <section className="login-shell" aria-label="Nexora login">
+      <section className="login-shell" aria-label={`${brand.name} login`}>
         <NexoraBrand />
         <form className="login-panel" onSubmit={submit}>
           <div className="segmented" role="tablist" aria-label="Modo de acceso">

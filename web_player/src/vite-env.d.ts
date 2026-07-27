@@ -1,6 +1,8 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
+  /** Override de marca para desarrollo (id del registro, p. ej. "lared"). */
+  readonly VITE_BRAND?: string;
   readonly VITE_NEXORA_API_BASE_URL?: string;
   readonly VITE_NEXORA_PLAYBACK_URL_TEMPLATE?: string;
   readonly VITE_NEXORA_APP_VERSION?: string;
