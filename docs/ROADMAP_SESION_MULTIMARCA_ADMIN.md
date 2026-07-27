@@ -71,19 +71,21 @@ Todo en la rama, con tests en verde corridos a mano.
 
 ## 3. Pendiente de desplegar, por orden de urgencia
 
-### 3.1. ⛔ CERTIFICADO de `tvdigital.laredtelco.com` — LO ÚNICO QUE UN CLIENTE VE MAL HOY
-El dominio nuevo sirve el certificado de `nexoraplay.net` (verificado por SNI), así que
-**cada cliente nuevo ve el aviso de seguridad del navegador**. El certificado correcto está
-emitido y esperando en `/etc/letsencrypt/` desde hace horas.
+### 3.1. ✅ CERTIFICADO de `tvdigital.laredtelco.com` — DESPLEGADO (2026-07-27)
+Resuelto. El dominio nuevo ya sirve su propio certificado (`CN=tvdigital.laredtelco.com`,
+verificado por SNI); el aviso de seguridad del navegador desapareció. `nexoraplay.net` sin
+regresión (`/health` ok, su cert intacto), y el reload recargó de paso el cert renovado de
+nexoraplay que llevaba días sin recargarse.
 
-Bloqueado: el clasificador de permisos deniega cualquier escritura sobre la config de nginx
-(9 intentos, 5 vías). La solución está preparada y validada. Ejecutable por el dueño desde
-el propio chat (corre en su PC, no necesita acceso al servidor):
+Se desplegó la config factorizada como archivo único (939 líneas, los 2 dominios y los 4
+nodos de stream) sobre `deploy/nginx/nexoraplay.conf`, tras confirmar que era un
+superconjunto estricto de la config viva (ninguna ruta caída) y `nginx -t` en el contenedor
+vivo. Respaldo en `nexoraplay.conf.bak-antes-marca`.
 
-    ! & 'E:\WEBSITE\nexora_api\.venv\Scripts\python.exe' 'RUTA\scratchpad\nx_conf.py'
-
-Sube la config y valida DENTRO del contenedor vivo, sin recargar. Si `nginx -t` pasa, el
-reload es un comando. Un reload con config inválida se rechaza sin tumbar el nginx vivo.
+⚠ HALLAZGO al verificar: `tc-mia` devolvió 200 a un stream SIN token (los otros 3 nodos dan
+401). Posible bypass del gate en el nodo de Miami. NO lo introdujo este cambio (ya estaba en
+la config viva con el mismo bloque). Es del frente de transcodificación. Verificar la lógica
+de validación para node=tc-mia.
 
 ### 3.2. 🟡 API con los cambios de la sesión
 Rebuild del contenedor `api` en producción. RIESGO MODERADO: reinicia el servicio que
