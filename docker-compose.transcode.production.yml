@@ -13,13 +13,27 @@
 # nexora_nginx, que la sirve bajo /stream/tc-main/ con su auth_request, igual
 # que cualquier otro canal. Sin token no hay video.
 #
-# Coste medido en este Xeon E5620 (4 nucleos):
-#   GAMATV      SD MPEG-2, ultrafast          0,34 nucleos
-#   GOLDEN_PLUS 1080p -> 720p, ultrafast      1,65 nucleos
-#   -----------------------------------------------------
-#   total                                     ~2,0 de 4
+# Coste medido en este Xeon E5620 (4 nucleos fisicos / 8 hilos):
+#   GAMATV       SD MPEG-2 + bwdif           0,39
+#   ECUADOR_TV   SD MPEG-2 (sin filtro)      0,33
+#   RCN-COL      SD MPEG-2 + bwdif           0,39
+#   CARACOL-COL  SD MPEG-2 + bwdif           0,37
+#   WARNER       SD MPEG-2 + bwdif           0,54
+#   GOLDEN_PLUS  1080i -> 720p + bwdif       2,14
+#   ----------------------------------------------
+#   total                                    ~4,2 de 8 hilos (51% CPU ociosa)
 # Los limites `cpus` son la red de seguridad: pase lo que pase, no se comen la
 # maquina que sirve la API.
+#
+# DESENTRELAZADO (2026-07-27). Medido con el filtro idet sobre las fuentes:
+# GAMATV, RCN-COL, WARNER y GOLDEN_PLUS son entrelazados de verdad (293-303
+# fotogramas TFF de 300); CARACOL-COL es mixto (180 TFF / 122 progresivos);
+# ECUADOR_TV es PROGRESIVO pese a que el stream se declara `tt`, por eso NO
+# lleva filtro — desentrelazarlo solo lo ablandaria.
+#
+# Se usa `bwdif=0` a secas y NO `idet,bwdif=deint=1`: el detector por fotograma
+# costaba mas que el propio desentrelazado (GAMATV 65% contra 39%, RCN 77%
+# contra 38%). En SD, bwdif sale practicamente gratis.
 
 services:
   tc_gamatv:
@@ -37,6 +51,7 @@ services:
         exec ffmpeg -hide_banner -loglevel warning
         -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5
         -i http://181.78.246.211:8002/GAMATV/mpegts
+        -vf bwdif=0
         -c:v libx264 -preset ultrafast -pix_fmt yuv420p
         -b:v 1500k -maxrate 1700k -bufsize 3000k
         -g 60 -keyint_min 60 -sc_threshold 0
@@ -90,6 +105,7 @@ services:
         exec ffmpeg -hide_banner -loglevel warning
         -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5
         -i http://181.78.246.211:8002/RCN-COL/mpegts
+        -vf bwdif=0
         -c:v libx264 -preset ultrafast -pix_fmt yuv420p
         -b:v 1500k -maxrate 1700k -bufsize 3000k
         -g 60 -keyint_min 60 -sc_threshold 0
@@ -114,6 +130,7 @@ services:
         exec ffmpeg -hide_banner -loglevel warning
         -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5
         -i http://181.78.246.211:8002/CARACOL-COL/mpegts
+        -vf bwdif=0
         -c:v libx264 -preset ultrafast -pix_fmt yuv420p
         -b:v 1500k -maxrate 1700k -bufsize 3000k
         -g 60 -keyint_min 60 -sc_threshold 0
@@ -141,6 +158,7 @@ services:
         exec ffmpeg -hide_banner -loglevel warning
         -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5
         -i http://181.78.246.211:8002/WARNER/mpegts
+        -vf bwdif=0
         -c:v libx264 -preset ultrafast -pix_fmt yuv420p
         -b:v 1500k -maxrate 1700k -bufsize 3000k
         -g 60 -keyint_min 60 -sc_threshold 0
@@ -167,7 +185,7 @@ services:
         exec ffmpeg -hide_banner -loglevel warning
         -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5
         -i http://181.78.246.211:8002/GOLDEN_PLUS/mpegts
-        -vf scale=1280:720
+        -vf bwdif=0,scale=1280:720
         -c:v libx264 -preset ultrafast -pix_fmt yuv420p
         -b:v 2500k -maxrate 2800k -bufsize 5000k
         -g 60 -keyint_min 60 -sc_threshold 0

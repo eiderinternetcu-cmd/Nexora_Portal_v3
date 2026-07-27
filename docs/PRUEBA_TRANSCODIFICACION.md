@@ -466,6 +466,57 @@ estaban inactivos.
 
 ---
 
+## Calidad: desentrelazado (2026-07-27)
+
+Todas las fuentes de satélite y las de TelecoWR se declaran **entrelazadas** (`field_order:
+tt`), y los transcodificadores las codificaban como si fueran progresivas. Eso deja el peine
+grabado en la imagen: se ve en cualquier paneo de cámara o rótulo que se desplace.
+
+**Pero la bandera del stream miente en la mitad de los casos.** Medido con el filtro `idet`
+sobre 300 fotogramas de cada fuente:
+
+| Fuente | TFF | Progresivos | Realidad |
+|---|---|---|---|
+| GAMA TV | 293 | 0 | entrelazado |
+| RCN COL | 302 | 0 | entrelazado |
+| WARNER | 297 | 4 | entrelazado |
+| GOLDEN PLUS | 303 | 4 | entrelazado (**1080i**, no 1080p) |
+| CARACOL COL | 180 | 122 | **mixto** |
+| ECUADOR TV | 0 | 287 | **progresivo** |
+| ESTRELLAS · TLNOVELAS · GOLDEN PREMIER 2H | 0 | ~305 | **progresivos** |
+
+Aplicar el filtro a ciegas habría **ablandado** ECUADOR TV y los tres de Miami sin ganar
+nada. Por eso ECUADOR TV **no lleva filtro**, y la torre de Miami no necesitó ningún cambio.
+
+### La trampa de medirlo mal
+
+`idet` sobre **la salida** ya transcodificada daba "progresivo" incluso antes de arreglar
+nada: la compresión a 1500 kbps destruye el patrón de peine lo bastante como para que el
+detector no lo vea, aunque el defecto siga ahí. **Hay que medir la fuente, no la salida.** Y
+en GOLDEN PLUS medir la salida era doblemente inútil, porque el escalado a 720p también
+borra el patrón.
+
+### `bwdif` sí, `idet` no
+
+La primera versión usaba `idet,bwdif=deint=1` —detectar por fotograma y desentrelazar solo
+lo que hiciera falta—, que es lo correcto sobre el papel para CARACOL. **El detector costaba
+más que el propio desentrelazado:**
+
+| Canal | Sin filtro | `idet,bwdif=deint=1` | `bwdif=0` |
+|---|---|---|---|
+| GAMA TV | 39 % | 65 % | **39 %** |
+| RCN | 37 % | 77 % | **39 %** |
+| WARNER | 38 % | 70 % | **54 %** |
+| GOLDEN PLUS | 195 % | 224 % | **214 %** |
+| **Total del edge** | — | **5,3 de 8 hilos** | **4,2 de 8** |
+
+Con `idet` el servidor llegó a `load 8,80` sobre 8 hilos: saturado. Con `bwdif=0` a secas, el
+desentrelazado en SD sale **prácticamente gratis** y quedan 51 % de CPU ociosa.
+
+Verificado en la salida de los seis: `TFF: 0`, todo progresivo.
+
+---
+
 ## Revisión de la cabecera (2026-07-27, 05:15)
 
 | | |
