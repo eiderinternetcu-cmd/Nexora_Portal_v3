@@ -432,6 +432,40 @@ Qué se puede hacer, por orden de sensatez:
 
 ---
 
+## Limpieza de streams caídos (2026-07-27)
+
+Seis streams estaban encendidos y muertos, reintentando en bucle. No todos eran el mismo
+caso, y la diferencia importa:
+
+| Stream | Reintentos | Fuente | Push | ¿Astra? | Acción |
+|---|---|---|---|---|---|
+| **WARNER** | 320 | `srt://181.78.246.211:2027` (listener propio, vacío) | — | **sí, `239.0.0.16`** | **reparado** |
+| CANAL_UNO_ECU | 54 | SRT `172.82.129.11` | `5023` | engañoso | **no tocar** |
+| TUDN | 318 | SRT TelecoWR | `5020` | no | dejar reintentando |
+| PASSION | 318 | SRT `15.235.107.193` | — | no | dejar reintentando |
+| UBE_Tv | 256 | SRT `187.251.170.35` | `5021` | no | fuera del catálogo |
+| MAKRODIGITAL_TV | 318 | SRT `104.37.190.102` | `5025` | no | dejar reintentando |
+
+**WARNER** tenía equivalente exacto en Astra y ningún push, así que repuntarlo era gratis:
+`alive: true`, 551 KB de entrada y `retry_count` de 320 a 0. Es MPEG-2 720x480, o sea que
+para navegador necesitaría un hueco de transcodificación (~0,34 núcleos); hoy no está en el
+catálogo. Respaldo en `ROLLBACK_WARNER_2026-07-27.json`.
+
+**CANAL_UNO_ECU es la trampa del lote.** Astra tiene un `Canal Uno` en `239.0.3.5`, y por
+nombre parece el arreglo obvio. **No lo es**: sus vecinos de bloque son `239.0.3.1`
+(CARACOL-COL) y `239.0.3.4` (RCN-COL), o sea que el `239.0.3.x` es la parrilla **colombiana**.
+Apuntar ahí el canal ecuatoriano habría metido contenido equivocado bajo el nombre correcto,
+que es peor que dejarlo caído.
+
+**Por qué NO se desactivan los tres restantes:** el bucle de reintentos es exactamente el
+mecanismo por el que un canal se recupera solo cuando el proveedor vuelve. Desactivarlos
+ahorra un `connect()` cada pocos segundos —despreciable— a cambio de que alguien tenga que
+acordarse de reactivarlos a mano. Lo que sí se corrigió es lo que veían los suscriptores:
+**UBE TV estaba activo en el catálogo con la fuente muerta**. TUDN y CANAL UNO ECU ya
+estaban inactivos.
+
+---
+
 ## Pendiente después de esto
 
 - **Los 13 canales de TelecoWR que faltan.** Entre el edge (~1,8 núcleos libres) y la torre
