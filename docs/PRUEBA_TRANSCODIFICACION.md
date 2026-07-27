@@ -401,6 +401,23 @@ La conclusión de aquel documento (la cabecera no es sitio para transcodificar) 
 pero los motivos buenos son otros: no tiene GPU, su transcoder es solo CPU, y el FTTH cuelga
 de la misma máquina.
 
+### Confirmado con tres pruebas independientes
+
+1. **La métrica no varía nunca**: seis muestras seguidas a 100 mientras `cpu_usage` oscilaba
+   entre 62 y 68.
+2. **El transporte llega limpio**: 25 s de ECUADOR TV y 25 s de GOLDEN PREMIER 2H → **cero
+   errores** de continuidad. El manifiesto responde en **16-27 ms**. Una cabecera saturada
+   no hace eso.
+3. **La documentación describe este caso exacto.** El manual de Flussonic define
+   `scheduler_load` como consumo del *scheduler* de Erlang, no de CPU. Y *Erlang in Anger*
+   explica por qué se dispara: *"para evitar dormirse cuando hay poco trabajo, los hilos que
+   controlan los schedulers hacen bucles de espera activa"*, e ilustra con schedulers al
+   99 % mientras el sistema reporta 70 % de CPU — *"hay una parte considerable de CPU que
+   estaría libre para trabajo real"*.
+
+Fuentes: [SNMP — Manual de Flussonic](https://flussonic.com/en-US/doc/api/snmp) ·
+[Erlang in Anger, métricas de runtime](https://github.com/heroku/erlang-in-anger/blob/master/105-runtime-metrics.tex)
+
 Qué se puede hacer, por orden de sensatez:
 
 1. **Usar `cpu_usage` y el bitrate de salida** para decidir, no `scheduler_load`.
