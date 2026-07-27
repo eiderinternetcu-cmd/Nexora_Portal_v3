@@ -1303,17 +1303,41 @@ button {
 }
 
 .launcher-logo {
+  position: relative;
+  display: flex;
   animation: launcher-float 6s ease-in-out infinite;
 }
 
+/* Halo de marca.
+   Antes esto eran tres drop-shadow() sobre el <img>, con desenfoques de hasta
+   110px. El problema: `launcher-float` anima transform, lo que promociona a
+   .launcher-logo a su propia capa de composicion, y ahi el drop-shadow se
+   rasteriza DENTRO de los limites de la capa. Con un logotipo que toca los
+   bordes de su caja —el circulo de La Red— el resplandor no cabe y se recorta:
+   se veia un cuadrado nitido alrededor del zorro.
+   Un gradiente radial en un pseudoelemento con inset negativo es circular por
+   construccion, se pinta fuera de la caja del <img> y no depende del canal alfa
+   del logotipo, asi que sirve igual para cualquier marca. */
+.launcher-logo::before {
+  content: "";
+  position: absolute;
+  inset: -22%;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgba(var(--brand-rgb), 0.42) 0%,
+    rgba(var(--brand-rgb), 0.16) 42%,
+    rgba(var(--brand-deep-rgb), 0.07) 62%,
+    transparent 72%
+  );
+  pointer-events: none;
+}
+
 .launcher-logo img {
+  position: relative;
   width: clamp(140px, 18vw, 260px);
   height: auto;
   display: block;
-  filter:
-    drop-shadow(0 0 24px rgba(var(--brand-rgb), 0.65))
-    drop-shadow(0 0 60px rgba(var(--brand-rgb), 0.3))
-    drop-shadow(0 0 110px rgba(var(--brand-deep-rgb), 0.18));
 }
 
 @keyframes launcher-float {
@@ -2717,6 +2741,7 @@ button {
   background: rgba(5, 8, 18, 0.48);
   box-shadow:
     0 0 80px rgba(var(--brand-rgb), 0.18),
+    0 0 34px rgba(var(--brand-light-rgb), 0.26),
     inset 0 0 38px rgba(var(--brand-light-rgb), 0.08);
   backdrop-filter: blur(10px);
 }
@@ -2725,7 +2750,10 @@ button {
   width: 74%;
   height: 74%;
   object-fit: contain;
-  filter: drop-shadow(0 0 26px rgba(var(--brand-light-rgb), 0.72));
+  /* Sin drop-shadow: este <img> anima transform (heroFloat), lo que lo pasa a
+     su propia capa de composicion y recorta el resplandor a un cuadrado — el
+     mismo defecto que se veia en .launcher-logo. El brillo lo aporta ahora el
+     box-shadow del contenedor, que no esta animado y por tanto no se recorta. */
   animation: heroFloat 5s ease-in-out infinite;
 }
 
