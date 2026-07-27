@@ -18,6 +18,10 @@ import { UsuariosView } from "../features/usuarios/UsuariosView";
 import { SuscriptoresView } from "../features/suscriptores/SuscriptoresView";
 import { SuscriptorDetalleView } from "../features/suscriptores/SuscriptorDetalleView";
 import { DispositivosView } from "../features/dispositivos/DispositivosView";
+import { DashboardView } from "../features/dashboard/DashboardView";
+import { SesionesView } from "../features/sesiones/SesionesView";
+import { CanalesView } from "../features/canales/CanalesView";
+import { AuditoriaView } from "../features/auditoria/AuditoriaView";
 
 /**
  * =========================================================================
@@ -77,7 +81,7 @@ export const SECTIONS: SectionRoute[] = [
     path: "/dashboard",
     label: "Dashboard",
     icon: LayoutDashboard,
-    component: SectionPlaceholder,
+    component: DashboardView,
   },
   {
     path: "/suscriptores",
@@ -117,19 +121,19 @@ export const SECTIONS: SectionRoute[] = [
     path: "/canales",
     label: "Canales",
     icon: Radio,
-    component: SectionPlaceholder,
+    component: CanalesView,
   },
   {
     path: "/sesiones",
     label: "Sesiones",
     icon: Activity,
-    component: SectionPlaceholder,
+    component: SesionesView,
   },
   {
     path: "/auditoria",
     label: "Auditoria",
     icon: ScrollText,
-    component: SectionPlaceholder,
+    component: AuditoriaView,
   },
 ];
 

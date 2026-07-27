@@ -379,7 +379,22 @@ export class AdminClient {
     return this.del<MessageResponse>(`/sessions/subscriber/${encodeURIComponent(subId)}`);
   }
 
-  /** Revoca una sesion por su JTI (campo `session_id` de LiveSession). */
+  /**
+   * Revoca una sesion por su `access_token_jti`.
+   *
+   * ⚠ HOY NO SE PUEDE LLAMAR DESDE LA UI, y el fallo es SILENCIOSO.
+   * Este endpoint resuelve por `Session.access_token_jti`
+   * (app/services/session_service.py:98-102), pero ningun esquema que reciba el
+   * panel expone ese valor: `LiveSessionOut.session_id` es la PK de la fila
+   * (app/api/admin/sessions.py:70) y `SessionOut.id` tambien. Pasarle el
+   * `session_id` NO da error: la API responde 200 con "Session not found or
+   * already revoked", asi que un boton construido sobre esto pareceria
+   * funcionar sin cortar nada.
+   *
+   * Usa `revokeSubscriberSessions()`, que si recibe un dato que la UI tiene.
+   * Para habilitar la revocacion individual hace falta que la API exponga el
+   * access_token_jti en LiveSessionOut, o que este endpoint acepte Session.id.
+   */
   revokeSession(jti: string) {
     return this.del<MessageResponse>(`/sessions/${encodeURIComponent(jti)}`);
   }
