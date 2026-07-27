@@ -517,6 +517,48 @@ Verificado en la salida de los seis: `TFF: 0`, todo progresivo.
 
 ---
 
+## Calidad: el preset importa más que el bitrate
+
+Con el desentrelazado puesto, la pregunta era si subir el bitrate de los SD (estaban a
+1500 kbps). Medido con **SSIM contra la fuente desentrelazada**, sobre 20 s fijos de GAMA TV
+capturados a fichero —para que todas las variantes compriman exactamente el mismo material—:
+
+| preset | bitrate | CPU (20 s) | SSIM | tamaño |
+|---|---|---|---|---|
+| `ultrafast` | 1500k | 6,03 s | 0,9216 | 3,9 MB |
+| `ultrafast` | 2000k | 6,25 s | 0,9290 | 5,1 MB |
+| `ultrafast` | 2500k | 6,39 s | 0,9342 | 6,3 MB |
+| **`superfast`** | **1500k** | **10,65 s** | **0,9393** | **3,8 MB** |
+| `superfast` | 2000k | 11,22 s | 0,9422 | 4,9 MB |
+| `veryfast` | 1500k | 16,72 s | 0,9433 | 3,8 MB |
+| `veryfast` | 2500k | 18,48 s | 0,9465 | 6,2 MB |
+
+**`superfast` a 1500k da más calidad que `ultrafast` a 2500k, con un 40 % menos de ancho de
+banda.** Subir el bitrate era el camino equivocado: lo que faltaba era eficiencia de
+compresión, no bits. `veryfast` sería aún mejor, pero cuesta 2,8× y cinco canales no caben.
+
+GOLDEN PLUS se queda en `ultrafast`: a `superfast` se iría a ~3,8 núcleos.
+
+> **Detalle de método:** hay que capturar la fuente a fichero primero. Comparar dos
+> codificaciones tomadas por separado de un directo no mide nada, porque cada una comprime
+> material distinto.
+
+### Coste y efecto en la API
+
+El edge pasa de 4,2 a **5,4 de 8 hilos**, con 34 % de CPU ociosa. **La API no se entera**:
+`/health` y el catálogo siguen respondiendo en 0,10-0,12 s, medido con 8 y 3 muestras. La
+primera toma dio 0,335 s, pero era el pico del reinicio de los contenedores — conviene
+esperar a que estabilicen antes de sacar conclusiones.
+
+Los límites `cpus` suben de 0,9 a 1,2 en los SD: con `superfast`, WARNER llega a ~0,96 y el
+tope anterior lo habría estrangulado.
+
+**Ya no hay sitio para más canales en el edge sin tocar algo**, y lo evidente sigue siendo
+GOLDEN PLUS: 194 % él solo —más que tres SD juntos— con una fuente que entrega segmentos
+truncados.
+
+---
+
 ## Revisión de la cabecera (2026-07-27, 05:15)
 
 | | |
