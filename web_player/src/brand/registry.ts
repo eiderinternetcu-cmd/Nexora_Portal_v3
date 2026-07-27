@@ -30,7 +30,9 @@ const LARED: Brand = {
   hostnames: ["tvdigital.laredtelco.com"],
   name: "LA RED",
   tagline: "INTERNET DE FIBRA OPTICA Y TV",
-  displayDomain: "LARED.EC",
+  // El dominio que se muestra en el pie debe ser el mismo por el que entra el
+  // usuario. lared.ec es la web de marketing, que vive en otro servidor.
+  displayDomain: "LAREDTELCO.COM",
   legal: "(C) 2026 WRIVERA LA RED Telecomunicaciones S.A. - Todos los derechos reservados",
   documentTitle: "La Red Web Player",
   themeColor: "#ff6600",
