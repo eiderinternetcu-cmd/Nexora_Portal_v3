@@ -35,6 +35,24 @@ class Settings(BaseSettings):
     login_lockout_minutes: int = 15
     rate_limit_per_minute: int = 60
 
+    # Browser CORS. The player and the admin panel are normally served from the
+    # SAME origin as the API (nginx proxies /api/), so no preflight happens and
+    # this list never comes into play; it only matters when a frontend lives on
+    # a different origin, where a missing entry surfaces as an opaque login
+    # failure with no clear hint. Comma-separated absolute origins
+    # (scheme://host[:port]), matched exactly by the CORS middleware.
+    # Default = the historical development origins, so leaving the variable
+    # unset keeps today's behavior byte for byte.
+    # NOTE: "*" together with credentials is invalid per the CORS spec (browsers
+    # reject the response), so a real deployment must list real origins here.
+    cors_allow_origins: str = (
+        "http://localhost:5173,"
+        "http://127.0.0.1:5173,"
+        "http://172.27.99.151:5173,"
+        "http://localhost:4173,"
+        "http://127.0.0.1:4173"
+    )
+
     # Feature flags — P0 rollout (default OFF: validate+warn, do not block)
     entitlement_enforce: bool = False   # True → playback denies channels not in plan_channels
     jwt_require_aud: bool = False        # True → strict iss/aud/type per surface; False → legacy-compatible
@@ -123,6 +141,35 @@ class Settings(BaseSettings):
     flussonic_mgmt_base_url: str = ""
     flussonic_co_main_mgmt_base_url: str = ""
     flussonic_ec_quito_mgmt_base_url: str = ""
+
+    @property
+    def is_production(self) -> bool:
+        """True when APP_ENV marks a production deployment.
+
+        APP_ENV already exists and is authoritative for the environment
+        (`production` in .env.production, `staging` in .env.staging,
+        `development` locally), while DEBUG is an independent verbosity switch
+        that is false in staging too. Used to close /docs, /redoc and
+        /openapi.json, which otherwise publish the full API map — including the
+        internal stream-auth contract — to anyone on the Internet.
+        """
+        return self.app_env.strip().lower() == "production"
+
+    @property
+    def cors_allowed_origins(self) -> list[str]:
+        """CORS_ALLOW_ORIGINS as an ordered, de-duplicated list of origins.
+
+        Same discipline as PLAYBACK_HOST_ALLOWLIST: CSV in the environment,
+        parsed here, never derived from a client-controlled header.
+        """
+        out: list[str] = []
+        seen: set[str] = set()
+        for raw in self.cors_allow_origins.split(","):
+            origin = raw.strip().rstrip("/")
+            if origin and origin.lower() not in seen:
+                seen.add(origin.lower())
+                out.append(origin)
+        return out
 
     @property
     def playback_allowed_hosts(self) -> dict[str, str]:

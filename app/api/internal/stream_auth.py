@@ -22,7 +22,14 @@ from app.services.stream_auth_service import StreamAuthService
 
 settings = get_settings()
 
-router = APIRouter(prefix="/internal/stream-auth", tags=["Internal — Stream Auth"])
+# include_in_schema=False: this is an edge-internal authorization gate. Even when
+# the schema IS published (development/staging), its route and parameter contract
+# must not be advertised — that contract is the map for attacking playback authz.
+router = APIRouter(
+    prefix="/internal/stream-auth",
+    tags=["Internal — Stream Auth"],
+    include_in_schema=False,
+)
 
 
 def _client_ip(request: Request) -> str | None:

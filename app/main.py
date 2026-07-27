@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import update
 
-from app.config import get_settings
+from app.config import Settings, get_settings
 from app.database import engine, AsyncSessionLocal
 from app.models.session import Session
 from app.redis_client import get_redis, close_redis
@@ -95,40 +95,8 @@ async def lifespan(app: FastAPI):
     print("[nexora-api] Shutdown complete")
 
 
-app = FastAPI(
-    title="Nexora API",
-    description="Nexora Middleware — Users, Subscribers, Devices & STB Core",
-    version="2.0.0",
-    docs_url="/docs",
-    redoc_url="/redoc",
-    lifespan=lifespan,
-)
-
-# ── Middleware ────────────────────────────────────────────────────────────────
-
-# Explicit origins are always allowed regardless of debug mode.
-# In debug, also open wildcard (credentials must be False with wildcard per CORS spec).
-_WEB_ORIGINS = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "http://172.27.99.151:5173",
-    "http://localhost:4173",
-    "http://127.0.0.1:4173",
-]
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=(["*"] if settings.debug else _WEB_ORIGINS),
-    allow_credentials=not settings.debug,  # False with wildcard (debug), True with explicit (prod)
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-app.add_middleware(RateLimitMiddleware)
-app.add_middleware(CorrelationIdMiddleware)
-
 # ── Exception handlers ────────────────────────────────────────────────────────
 
-@app.exception_handler(NexoraException)
 async def nexora_exception_handler(request: Request, exc: NexoraException):
     # Consistent contract: `error` is ALWAYS a string. A structured detail
     # ({"reason_code","message"}) is flattened to error=message + reason_code.
@@ -147,7 +115,6 @@ async def nexora_exception_handler(request: Request, exc: NexoraException):
     )
 
 
-@app.exception_handler(Exception)
 async def generic_exception_handler(request: Request, exc: Exception):
     if settings.debug:
         raise exc
@@ -158,15 +125,6 @@ async def generic_exception_handler(request: Request, exc: Exception):
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
-app.include_router(v1_router)         # /api/v1/  — legacy compat
-app.include_router(admin_router)      # /api/admin/
-app.include_router(stb_router)        # /api/stb/
-app.include_router(subscriber_router) # /api/subscriber/
-app.include_router(client_router)     # /api/client/
-app.include_router(internal_stream_auth_router)  # /internal/stream-auth/ (edge auth_request)
-
-
-@app.get("/health", tags=["Health"])
 async def health():
     redis = await get_redis()
     redis_ok = await redis.ping()
@@ -177,3 +135,66 @@ async def health():
         "redis": "ok" if redis_ok else "error",
         "version": "2.0.0",
     }
+
+
+# ── Application factory ───────────────────────────────────────────────────────
+
+def create_app(config: Settings | None = None) -> FastAPI:
+    """Build the ASGI app for `config` (defaults to the process settings).
+
+    A factory (instead of a bare module-level FastAPI()) so the two
+    environment-dependent decisions below — whether the API schema is published
+    and which browser origins are allowed — can be exercised in tests without
+    reimporting this module.
+    """
+    cfg = config or settings
+
+    # /docs, /redoc and /openapi.json publish the complete API map, including
+    # /internal/stream-auth/validate and its parameter contract — the exact map
+    # someone attacking playback authorization needs. Closed in production;
+    # unchanged (open) in development and staging.
+    docs_enabled = not cfg.is_production
+
+    application = FastAPI(
+        title="Nexora API",
+        description="Nexora Middleware — Users, Subscribers, Devices & STB Core",
+        version="2.0.0",
+        docs_url="/docs" if docs_enabled else None,
+        redoc_url="/redoc" if docs_enabled else None,
+        openapi_url="/openapi.json" if docs_enabled else None,
+        lifespan=lifespan,
+    )
+
+    # ── Middleware ────────────────────────────────────────────────────────────
+    # Allowed origins come from CORS_ALLOW_ORIGINS (CSV); the default keeps the
+    # historical development origins so an unset variable changes nothing.
+    # In debug, also open wildcard (credentials MUST be False with wildcard per
+    # the CORS spec — browsers reject wildcard + credentials).
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=(["*"] if cfg.debug else cfg.cors_allowed_origins),
+        allow_credentials=not cfg.debug,  # False with wildcard (debug), True with explicit (prod)
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    application.add_middleware(RateLimitMiddleware)
+    application.add_middleware(CorrelationIdMiddleware)
+
+    # ── Exception handlers ────────────────────────────────────────────────────
+    application.add_exception_handler(NexoraException, nexora_exception_handler)
+    application.add_exception_handler(Exception, generic_exception_handler)
+
+    # ── Routes ────────────────────────────────────────────────────────────────
+    application.include_router(v1_router)         # /api/v1/  — legacy compat
+    application.include_router(admin_router)      # /api/admin/
+    application.include_router(stb_router)        # /api/stb/
+    application.include_router(subscriber_router) # /api/subscriber/
+    application.include_router(client_router)     # /api/client/
+    application.include_router(internal_stream_auth_router)  # /internal/stream-auth/ (edge auth_request)
+
+    application.add_api_route("/health", health, methods=["GET"], tags=["Health"])
+
+    return application
+
+
+app = create_app()
