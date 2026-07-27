@@ -46,6 +46,33 @@ services:
         -hls_segment_filename /hls/GAMATV/seg_%05d.ts
         /hls/GAMATV/index.m3u8
 
+  tc_ecuadortv:
+    image: jrottenberg/ffmpeg:6.1-alpine
+    container_name: nexora_tc_ecuadortv
+    restart: unless-stopped
+    cpus: 0.9
+    networks: [nexora_net]
+    volumes:
+      - hls_data:/hls
+    entrypoint: ["/bin/sh", "-c"]
+    # MPEG-2 720x480 desde el multicast de Astra (239.0.12.6), reparado el
+    # 2026-07-27: apuntaba a una URL muerta con 223 reintentos. Mismo perfil
+    # que GAMATV — SD sin escalar, ultrafast. Medido: 0,34 nucleos.
+    command:
+      - >-
+        mkdir -p /hls/ECUADOR_TV &&
+        exec ffmpeg -hide_banner -loglevel warning
+        -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5
+        -i http://181.78.246.211:8002/ECUADOR_TV/mpegts
+        -c:v libx264 -preset ultrafast -pix_fmt yuv420p
+        -b:v 1500k -maxrate 1700k -bufsize 3000k
+        -g 60 -keyint_min 60 -sc_threshold 0
+        -c:a aac -b:a 128k -ac 2
+        -f hls -hls_time 4 -hls_list_size 6
+        -hls_flags delete_segments+append_list+omit_endlist
+        -hls_segment_filename /hls/ECUADOR_TV/seg_%05d.ts
+        /hls/ECUADOR_TV/index.m3u8
+
   tc_golden:
     image: jrottenberg/ffmpeg:6.1-alpine
     container_name: nexora_tc_golden

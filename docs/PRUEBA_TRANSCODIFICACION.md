@@ -128,9 +128,26 @@ Dos canales, uno de cada problema, para cubrir los dos modos de fallo:
 
 | Canal | Origen | Perfil | Coste medido |
 |---|---|---|---|
-| **GAMA TV** (44) | satélite MPEG-2 | `ultrafast`, sin escalar | **42 % de un núcleo** |
-| **GOLDEN PLUS** (5) | TelecoWR 1080p, GOP roto | 720p `ultrafast` | **167 %** |
-| | | **total** | **≈ 2,1 de 4 núcleos** |
+| **GAMA TV** (44) | satélite MPEG-2 | `ultrafast`, sin escalar | **33 % de un núcleo** |
+| **ECUADOR TV** (30) | satélite MPEG-2 | `ultrafast`, sin escalar | **44 %** |
+| **GOLDEN PLUS** (5) | TelecoWR 1080p, GOP roto | 720p `ultrafast` | **144 %** |
+| | | **total** | **≈ 2,2 de 4 núcleos** |
+
+### ECUADOR TV: hubo que reparar la fuente antes
+
+El canal 30 estaba **desactivado** en el catálogo y su stream en la cabecera apuntaba a
+`hlss://94.130.236.167:8081/shogun/index.m3u8`, muerta, con **`retry_count: 223`**.
+
+Se repuntó al multicast real de Astra —`udp://239.0.12.6:1234/10.2.1.1`, el mismo patrón
+que se usó con GAMA TV— conservando intacto el `push` a `udp://235.2.2.2:5028`, que es el
+que alimenta los moduladores y el FTTH. Resultado inmediato: `alive: true`, 1.092 kbps,
+`retry_count` de vuelta a 0.
+
+Respaldo del estado previo en `ROLLBACK_ECUADOR_TV_2026-07-27.json`.
+
+**La cabecera no acusó el cambio**: `cpu_usage` 61 % (antes 63-68 %), `memory_usage` 34 %
+(antes 36 %), `scheduler_load` 100 —que ya estaba a 100 de antes—. Astra tampoco: emitía
+ese multicast hubiera o no alguien escuchando; lo único nuevo es que Flussonic se suscribe.
 
 ### Cómo está montado
 
@@ -236,6 +253,43 @@ producción la rechaza; no hay entrada para este host en `~/.ssh/config`; ningun
 
 ---
 
+## Sobre el `scheduler_load` a 100
+
+Conviene corregir una lectura de `SOLUCIONES_PLAYBACK_NAVEGADOR.md`: allí se usó
+`scheduler_load: 100` como prueba de que la cabecera está saturada. **Ese argumento es más
+débil de lo que parecía.** Medido en seis muestras seguidas:
+
+```
+muestra   cpu_usage   scheduler_load
+   1          66            100
+   2          64            100
+   3          62            100
+   ...        ...           100
+```
+
+El valor **no se mueve** mientras la CPU oscila entre 62 y 68 %. Una métrica clavada en 100
+que no reacciona no está midiendo carga: `scheduler_load` es la utilización de los
+schedulers de la máquina virtual de Erlang, y por defecto esos schedulers hacen **espera
+activa** — giran en vacío en lugar de dormirse, y eso los cuenta como ocupados.
+
+La conclusión de aquel documento (la cabecera no es sitio para transcodificar) **no cambia**,
+pero los motivos buenos son otros: no tiene GPU, su transcoder es solo CPU, y el FTTH cuelga
+de la misma máquina.
+
+Qué se puede hacer, por orden de sensatez:
+
+1. **Usar `cpu_usage` y el bitrate de salida** para decidir, no `scheduler_load`.
+2. **Limpiar los streams caídos**: 6 están encendidos y muertos, reintentando en bucle
+   (TUDN, WARNER, PASSION, MAKRODIGITAL_TV con 218 intentos cada uno; UBE_Tv 114;
+   CANAL_UNO_ECU 19). Otros 36 están desactivados y no consumen. O se reparan contra su
+   multicast de Astra —como se hizo con ECUADOR TV— o se desactivan.
+3. **Flags de la VM de Erlang** (`+sbwt none +sbwtdcpu none +sbwtdio none`, `+S` ajustado a
+   los núcleos) si se quiere que el número refleje la realidad. **Exige reiniciar Flussonic**,
+   lo que corta la señal del FTTH: solo con ventana acordada, y sabiendo que la licencia
+   crackeada deja sin soporte si algo sale mal.
+
+---
+
 ## Pendiente después de esto
 
 - **Los 16 canales de TelecoWR que faltan.** No caben en este servidor: cada uno cuesta
@@ -246,7 +300,7 @@ producción la rechaza; no hay entrada para este host en `~/.ssh/config`; ningun
   alerta de nodo caído que ya estaba pendiente.
 - **Versionar `nexoraplay.conf`** (PR #9). El bloque `tc-main` ya tiene copia en
   `deploy/transcode/`, pero el fichero vivo del edge sigue existiendo solo en el servidor.
-- Sigue abierto lo del documento anterior: `ECUADOR_TV` con `retry_count` creciendo contra
-  `hlss://94.130.236.167:8081/shogun/index.m3u8`, muerta.
+- **Los 5 streams caídos que quedan** en la cabecera (TUDN, WARNER, PASSION,
+  MAKRODIGITAL_TV, UBE_Tv): repararlos contra Astra o desactivarlos.
 - Y lo de siempre, que esto no cambia: **corregir el GOP en origen sigue siendo gratis**.
   Si TelecoWR acepta, sus 18 canales dejan de necesitar transcodificación.
