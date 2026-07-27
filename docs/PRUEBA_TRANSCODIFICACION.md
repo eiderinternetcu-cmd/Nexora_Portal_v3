@@ -253,6 +253,82 @@ producción la rechaza; no hay entrada para este host en `~/.ssh/config`; ningun
 
 ---
 
+## Torre de Miami — nodo `tc-mia`, desplegado 2026-07-27
+
+Segunda máquina, dedicada solo a transcodificar: **Xeon E3-1275L v3** (Haswell, 4 núcleos /
+8 hilos, 2,7 GHz con turbo a 3,9, **con AVX2** — que al E5620 le falta), 31 GB RAM, 878 GB
+de disco. $50/mes.
+
+| Canal | # | Fuente |
+|---|---|---|
+| GOLDEN PREMIER 2H | 6 | TelecoWR 1080p 30 fps |
+| ESTRELLAS | 7 | TelecoWR 1080p **60 fps** |
+| TLNOVELAS | 8 | TelecoWR 1080p 30 fps |
+
+### Capacidad real: tres canales, no cuatro
+
+La estimación por calibración sintética decía 0,67 núcleos por canal. **Medido con los tres
+corriendo de verdad: 100 %, 97,9 % y 93,8 % — casi un núcleo entero cada uno.**
+
+La calibración sintética servía para comparar máquinas, no para dimensionar: `testsrc2` sale
+3,5 veces más barato que vídeo real. Y ESTRELLAS va a **60 fps**, el doble de fotogramas que
+codificar.
+
+Con 4 núcleos físicos, **la torre da para tres canales de este tipo**. Un cuarto la satura.
+
+### Montaje
+
+- **Sin Docker**: máquina dedicada, ffmpeg nativo supervisado por systemd
+  (`nexora-tc@.service`, `Restart=always`). Script completo en `mia-tower-setup.sh`.
+- **nginx local en el 8088** sirviendo `/var/hls`, con **ufw cerrado**: solo entra SSH y el
+  8088 exclusivamente desde `45.184.225.4`.
+- **En el edge**, `location ^~ /stream/tc-mia/` con el mismo `auth_request` que todos los
+  demás nodos (`nginx-location-tc-mia.conf`, insertado por `patch_nginx_tc_mia.py`).
+- Los canales llevan `flussonic_node='tc-mia'` y `source_url` relativa.
+
+> **Trampa de systemd que costó encontrar:** `${VFILTER}` con llaves se expande como **un
+> solo argumento**, así que ffmpeg recibía `"-vf scale=1280:720"` pegado y fallaba. Sin
+> llaves (`$VFILTER`) systemd lo separa en palabras. Está comentado en la unidad.
+
+### Requisito externo
+
+La cabecera `181.78.246.211` **filtra por IP**. Antes de que el NOC metiera `66.163.125.89`
+en la lista blanca, la máquina no recibía ni respuesta al ping — mientras que
+`38.210.187.13:8002` y el resto de internet sí respondían, lo que descartaba problema local.
+
+### Verificación (2026-07-27 03:45)
+
+```
+SIN token:   los tres -> 401
+CON token:   manifiesto 200, segmentos de 1,4 a 1,6 MB
+GOP:         GOLDEN PREMIER 2H  121 fotogramas, I en 0 y 60
+             ESTRELLAS          241 fotogramas, I en 0 y 120   (60 fps)
+             TLNOVELAS          121 fotogramas, I en 0 y 60
+```
+
+### Arquitectura: pendiente de decidir
+
+Hoy el vídeo va **Esmeraldas → Miami → edge → cliente**: cruza a Miami y vuelve, y el edge
+paga ese ancho de banda dos veces. La alternativa es que Miami sirva directo al cliente con
+su propio `auth_request` contra la API, lo que cuesta un subdominio (`tc.nexoraplay.net`) y
+su certificado. Con más canales, la diferencia se nota.
+
+### Concesiones en planes: la trampa que escondió ECUADOR TV
+
+Con `ENTITLEMENT_ENFORCE=true`, un canal activo **no se ve si no está concedido en el plan
+del suscriptor**. ECUADOR TV estaba solo en el Plan Anual, y GOLDEN PLUS igual. Al añadir un
+canal transcodificado hay que concederlo en **todos** los planes:
+
+```sql
+insert into plan_channels (id, plan_id, channel_id, is_enabled, created_at)
+select gen_random_uuid(), p.id, c.id, true, now()
+from plans p cross join channels c
+where c.flussonic_node like 'tc-%'
+on conflict (plan_id, channel_id) do update set is_enabled = true;
+```
+
+---
+
 ## Sobre el `scheduler_load` a 100
 
 Conviene corregir una lectura de `SOLUCIONES_PLAYBACK_NAVEGADOR.md`: allí se usó
@@ -292,9 +368,11 @@ Qué se puede hacer, por orden de sensatez:
 
 ## Pendiente después de esto
 
-- **Los 16 canales de TelecoWR que faltan.** No caben en este servidor: cada uno cuesta
-  1,65 núcleos y quedan ~1,9 libres. Es la decisión de hardware que sigue abierta —
-  máquina dedicada o GPU con NVENC.
+- **Los 13 canales de TelecoWR que faltan.** Entre el edge (~1,8 núcleos libres) y la torre
+  (llena con tres) no queda sitio. A ~1 núcleo por canal harían falta **cuatro torres más**
+  a $50/mes cada una, o sea $250/mes en total — contra una GPU con NVENC, que mueve 10-15
+  flujos 1080p en una sola máquina. Y sigue en pie la opción gratis: que TelecoWR corrija
+  el GOP en origen.
 - **Supervisión de los transcodificadores.** Hoy `restart: unless-stopped` los relevanta si
   mueren, pero nadie avisa si la fuente cae y ffmpeg reconecta en bucle. Encaja con la
   alerta de nodo caído que ya estaba pendiente.
