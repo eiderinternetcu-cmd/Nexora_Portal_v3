@@ -15,6 +15,9 @@ import type { UserRole } from "../api/types";
 import { SectionPlaceholder } from "./SectionPlaceholder";
 import { PlanesView } from "../features/planes/PlanesView";
 import { UsuariosView } from "../features/usuarios/UsuariosView";
+import { SuscriptoresView } from "../features/suscriptores/SuscriptoresView";
+import { SuscriptorDetalleView } from "../features/suscriptores/SuscriptorDetalleView";
+import { DispositivosView } from "../features/dispositivos/DispositivosView";
 
 /**
  * =========================================================================
@@ -80,7 +83,15 @@ export const SECTIONS: SectionRoute[] = [
     path: "/suscriptores",
     label: "Suscriptores",
     icon: Users,
-    component: SectionPlaceholder,
+    component: SuscriptoresView,
+  },
+  {
+    // Subruta: sin ella, pulsar una fila del listado cae en el 404.
+    path: "/suscriptores/:id",
+    label: "Detalle de suscriptor",
+    icon: Users,
+    component: SuscriptorDetalleView,
+    hidden: true,
   },
   {
     path: "/planes",
@@ -92,7 +103,7 @@ export const SECTIONS: SectionRoute[] = [
     path: "/dispositivos",
     label: "Dispositivos",
     icon: MonitorSmartphone,
-    component: SectionPlaceholder,
+    component: DispositivosView,
   },
   {
     // La API exige rol admin para /users (require_admin en app/api/v1/users.py).
