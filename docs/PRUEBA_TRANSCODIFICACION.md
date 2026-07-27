@@ -329,6 +329,43 @@ on conflict (plan_id, channel_id) do update set is_enabled = true;
 
 ---
 
+## Cómo decidir si un canal necesita transcodificarse
+
+Antes de gastar un núcleo en un canal, hay que comprobar si lo necesita. Herramienta:
+`scripts/check_browser_playable.py AXN AE_MUNDO ...` (solo lectura).
+
+Un canal vale para navegador si cumple **las dos**:
+
+1. **El vídeo es H.264.** MSE no decodifica MPEG-2 —`isTypeSupported('mp2v')` es `false`—.
+2. **Cada segmento arranca en keyframe.** La especificación de MSE inicializa
+   `need random access point` a `true` y descarta todo fotograma que no sea punto de acceso
+   aleatorio, reiniciando la regla al principio de cada segmento.
+
+> **Trampa del método, que casi cuesta cuatro núcleos:** hay que mirar los **paquetes**
+> (`-show_entries packet=flags`), que van en **orden de decodificación**. Los **fotogramas**
+> (`frame=pict_type`) salen en **orden de presentación**, donde los B se muestran antes que
+> el I que se decodifica primero — y ahí un segmento perfectamente válido *parece* empezar
+> en B. Mirando fotogramas se concluye que hace falta transcodificar cuando no hace falta.
+
+### Cuatro canales que NO necesitaban transcodificarse (2026-07-27)
+
+| # | Canal | stream_key | Códec | Veredicto |
+|---|---|---|---|---|
+| 45 | AXN | `AXN` | H.264 1280x720 | directo |
+| 46 | A&E MUNDO | `AE_MUNDO` | H.264 1280x720 | directo |
+| 47 | SONY CHANNEL | `SONY_CHANNEL` | H.264 1280x720 | directo |
+| 48 | LIFETIME | `LIFETIME` | H.264 1280x720 | directo |
+
+Entran por el multicast de Astra (`udp://239.0.1.7:100x`) y sus segmentos traen `K` en el
+paquete 0. El manifiesto que sirve el edge lo confirma: `CODECS="avc1.4d4028"` —H.264 Main
+4.0—, `RESOLUTION=1280x720`, con dos pistas AAC (spa/eng) y el token propagado a variantes y
+audios. **Coste de CPU: cero.**
+
+Van en `ec-main` como cualquier canal normal; solo hubo que darlos de alta y concederlos en
+los dos planes.
+
+---
+
 ## Sobre el `scheduler_load` a 100
 
 Conviene corregir una lectura de `SOLUCIONES_PLAYBACK_NAVEGADOR.md`: allí se usó
