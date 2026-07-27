@@ -36,6 +36,9 @@ const LARED: Brand = {
   legal: "(C) 2026 WRIVERA LA RED Telecomunicaciones S.A. - Todos los derechos reservados",
   documentTitle: "La Red Web Player",
   themeColor: "#ff6600",
+  // El logotipo original es de 1920x653, asi que aguanta el uso a pantalla
+  // completa. El zorro se mantiene arriba: es el icono oficial de la marca.
+  useLogoAsWordmark: true,
   assets: assetsFor("lared"),
 };
 

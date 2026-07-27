@@ -1364,6 +1364,24 @@ button {
   line-height: 1;
 }
 
+/* Logotipo real de la marca, en lugar del nombre compuesto con tipografia.
+   Se activa por marca con useLogoAsWordmark, porque exige un original con
+   resolucion suficiente. La altura se ata al mismo clamp que .launcher-brand
+   para que ambas variantes ocupen lo mismo y el resto de la portada no baile.
+   Aqui NO se usa drop-shadow: este bloque queda dentro del area de
+   .launcher-top, y un desenfoque grande sobre un elemento ancho vuelve a
+   arriesgar el recorte en cuadrado que se corrigio en .launcher-logo. */
+.launcher-wordmark {
+  margin-top: -4px;
+  /* Mas alto que el clamp de .launcher-brand a proposito: un logotipo ancho y
+     bajo pesa menos en pantalla que el mismo alto en tipografia de peso 900. */
+  height: clamp(2.6rem, 5.8vw, 5.8rem);
+  width: auto;
+  max-width: min(78vw, 520px);
+  object-fit: contain;
+  display: block;
+}
+
 .launcher-cards {
   position: relative;
   z-index: 10;

@@ -157,7 +157,11 @@ export function HomeView({
         <div className="launcher-logo">
           <img src={brand.assets.playerLogo} alt="" />
         </div>
-        <div className="launcher-brand">{brand.name}</div>
+        {brand.useLogoAsWordmark ? (
+          <img className="launcher-wordmark" src={brand.assets.logo} alt={brand.name} />
+        ) : (
+          <div className="launcher-brand">{brand.name}</div>
+        )}
       </section>
 
       <section className="launcher-cards">

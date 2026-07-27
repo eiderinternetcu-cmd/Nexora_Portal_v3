@@ -34,5 +34,12 @@ export type Brand = {
   documentTitle: string;
   /** <meta name="theme-color">. */
   themeColor: string;
+  /**
+   * Pinta el logotipo real en la portada en vez del nombre en tipografia.
+   * Opcional a proposito: solo debe activarse si assets.logo tiene resolucion
+   * suficiente para verse a ~330px de ancho. El logotipo de Nexora es de
+   * 158x50, asi que ahi se sigue componiendo el nombre con tipografia.
+   */
+  useLogoAsWordmark?: boolean;
   assets: BrandAssets;
 };
