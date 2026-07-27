@@ -1,0 +1,147 @@
+/* Estilos de la seccion Planes. Prefijo obligatorio: .planes-  */
+
+.planes-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+
+.planes-heading h2 {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.planes-heading p {
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--text-muted);
+  max-width: 60ch;
+}
+
+.planes-header-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.planes-row-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.planes-name {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.planes-name strong {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.planes-name span {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.planes-num {
+  font-variant-numeric: tabular-nums;
+}
+
+.planes-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.planes-form-grid .planes-span-2 {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 620px) {
+  .planes-form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.planes-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--text);
+}
+
+/* Panel del hueco de la API: canales incluidos en el plan. */
+.planes-gap {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.planes-gap-warning {
+  display: flex;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(var(--warn-rgb), 0.4);
+  background: rgba(var(--warn-rgb), 0.1);
+  color: var(--text);
+  line-height: 1.5;
+}
+
+.planes-gap-warning svg {
+  flex: 0 0 auto;
+  color: var(--warn);
+  margin-top: 2px;
+}
+
+.planes-gap h4 {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.planes-gap p {
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+.planes-gap pre {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.planes-gap-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-left: 18px;
+  color: var(--text-muted);
+  line-height: 1.55;
+}
+
+.planes-gap-list li {
+  list-style: disc;
+}
+
+.planes-gap-list code {
+  color: var(--text);
+}

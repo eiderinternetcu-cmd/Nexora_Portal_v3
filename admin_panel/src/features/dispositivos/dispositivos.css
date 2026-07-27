@@ -1,0 +1,136 @@
+/* ==========================================================================
+   Seccion Dispositivos. Solo clases con prefijo .disp-*; los tokens salen de
+   src/styles/admin.css (cimientos) y no se redefinen aqui.
+   ========================================================================== */
+
+.disp-page {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.disp-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.disp-header h1 {
+  font-size: 20px;
+}
+
+.disp-subtitle {
+  margin: 4px 0 0;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.disp-toolbar {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.disp-toolbar-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 180px;
+}
+
+.disp-toolbar-field.disp-grow {
+  flex: 1 1 260px;
+}
+
+.disp-toolbar-label {
+  font-size: 12px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.disp-toolbar-hint {
+  margin: 0;
+  flex-basis: 100%;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.disp-celda {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.disp-celda-principal {
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.disp-celda-secundaria {
+  font-size: 12px;
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+}
+
+.disp-mono {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.disp-acciones {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.disp-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+.disp-pager-info {
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.disp-pager-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.disp-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.disp-form-error {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(var(--danger-rgb), 0.35);
+  background: rgba(var(--danger-rgb), 0.12);
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.disp-aviso {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}

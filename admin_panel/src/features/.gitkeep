@@ -1,0 +1,5 @@
+Cada seccion del panel vive en su propia carpeta aqui:
+  src/features/suscriptores/SuscriptoresView.tsx
+  src/features/planes/PlanesView.tsx
+  ...
+Registra la pantalla cambiando su `component` en src/app/sections.tsx.

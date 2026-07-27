@@ -1,0 +1,199 @@
+/* ==========================================================================
+   CANALES — catalogo consultivo + estado de Flussonic. Clases con prefijo can-.
+   ========================================================================== */
+
+.can {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.can-barra {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.can-barra-izq,
+.can-barra-der {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.can-buscador {
+  min-width: 240px;
+}
+
+.can-nota {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(var(--info-rgb), 0.3);
+  background: rgba(var(--info-rgb), 0.08);
+  color: var(--text-muted);
+  font-size: 12.5px;
+}
+
+.can-nota svg {
+  color: var(--info);
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+/* ---- Panel de Flussonic -------------------------------------------------- */
+
+.can-panel {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 16px;
+}
+
+.can-panel-cabecera {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.can-panel-titulo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+}
+
+.can-panel-titulo svg {
+  color: var(--text-muted);
+}
+
+.can-aviso {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+}
+
+.can-aviso-cargando,
+.can-aviso-vacio {
+  color: var(--text-dim);
+  background: var(--surface-2);
+}
+
+.can-aviso-error {
+  color: var(--danger);
+  background: rgba(var(--danger-rgb), 0.1);
+  border: 1px solid rgba(var(--danger-rgb), 0.35);
+}
+
+.can-aviso-error span {
+  flex: 1;
+}
+
+.can-salud {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  align-items: center;
+  font-size: 13px;
+}
+
+.can-salud-dato {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.35;
+}
+
+.can-salud-etiqueta {
+  color: var(--text-dim);
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.can-mono {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  word-break: break-all;
+}
+
+.can-numero {
+  font-variant-numeric: tabular-nums;
+}
+
+.can-vacio {
+  color: var(--text-dim);
+}
+
+/* ---- Detalle del canal --------------------------------------------------- */
+
+.can-detalle {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px 20px;
+}
+
+.can-detalle-fila {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.can-detalle-etiqueta {
+  color: var(--text-dim);
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.can-detalle-valor {
+  word-break: break-word;
+}
+
+.can-secreto {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.can-secreto-oculto {
+  font-family: var(--font-mono);
+  color: var(--text-dim);
+  letter-spacing: 0.15em;
+}
+
+.can-bloque {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.can-bloque h3 {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+}
+
+.can-estado-stream {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  align-items: center;
+  font-size: 13px;
+}

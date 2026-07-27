@@ -1,0 +1,8 @@
+node_modules
+dist
+.env
+*.tsbuildinfo
+
+# Salida de `tsc -b` sobre tsconfig.node.json (se regenera en cada build)
+vite.config.js
+vite.config.d.ts

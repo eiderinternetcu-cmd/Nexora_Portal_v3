@@ -1,0 +1,130 @@
+/* Estilos de la seccion Usuarios. Prefijo obligatorio: .usuarios-  */
+
+.usuarios-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+
+.usuarios-heading h2 {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.usuarios-heading p {
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--text-muted);
+  max-width: 62ch;
+}
+
+.usuarios-header-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.usuarios-forbidden {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(var(--danger-rgb), 0.45);
+  background: rgba(var(--danger-rgb), 0.12);
+  line-height: 1.5;
+}
+
+.usuarios-forbidden svg {
+  flex: 0 0 auto;
+  color: var(--danger);
+  margin-top: 2px;
+}
+
+.usuarios-forbidden strong {
+  display: block;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.usuarios-forbidden span {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.usuarios-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.usuarios-identity strong {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.usuarios-identity span {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.usuarios-self {
+  margin-left: 6px;
+  font-size: 11px;
+  color: var(--brand-light);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.usuarios-row-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.usuarios-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.usuarios-pager-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.usuarios-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.usuarios-form-grid .usuarios-span-2 {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 620px) {
+  .usuarios-form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.usuarios-note {
+  font-size: 12.5px;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+
+.usuarios-dim {
+  color: var(--text-dim);
+}
