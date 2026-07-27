@@ -1,0 +1,55 @@
+# Prueba local de transcodificacion — Opcion 3 de docs/SOLUCIONES_PLAYBACK_NAVEGADOR.md
+#
+# Toma GAMATV (MPEG-2, que el navegador NO puede decodificar) desde la cabecera
+# Flussonic y publica HLS H.264/AAC con GOP cerrado de 2 s, que es lo que exige
+# Media Source Extensions.
+#
+# Stack independiente a proposito: no toca docker-compose.yml, que esta sirviendo.
+#   Arrancar:  docker compose -f docker-compose.transcode.yml up -d
+#   Ver log:   docker logs -f nexora_transcoder
+#   Parar:     docker compose -f docker-compose.transcode.yml down -v
+#
+# Coste medido en el Xeon E5620 de produccion: 0,98 nucleos por canal SD.
+
+services:
+  transcoder:
+    image: jrottenberg/ffmpeg:6.1-alpine
+    container_name: nexora_transcoder
+    restart: unless-stopped
+    volumes:
+      - hls_data:/hls
+    # Un solo elemento en la lista: si se pasa como texto, Docker lo trocea en
+    # argumentos y "sh -c" solo recibe la primera palabra.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        mkdir -p /hls/gamatv &&
+        exec ffmpeg -hide_banner -loglevel warning
+        -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5
+        -i http://181.78.246.211:8002/GAMATV/mpegts
+        -c:v libx264 -preset veryfast -pix_fmt yuv420p
+        -b:v 1800k -maxrate 2000k -bufsize 3600k
+        -g 60 -keyint_min 60 -sc_threshold 0
+        -c:a aac -b:a 128k -ac 2
+        -f hls -hls_time 4 -hls_list_size 6
+        -hls_flags delete_segments+append_list+omit_endlist
+        -hls_segment_filename /hls/gamatv/seg_%05d.ts
+        /hls/gamatv/index.m3u8
+
+  hls:
+    image: nginx:1.27-alpine
+    container_name: nexora_hls
+    restart: unless-stopped
+    depends_on:
+      - transcoder
+    ports:
+      - "8088:80"
+    volumes:
+      - hls_data:/usr/share/nginx/html:ro
+      # Variante local: lleva CORS porque el player corre en otro puerto (5173)
+      # y pide los segmentos a 8088. La de produccion no lo necesita: alli todo
+      # sale por el mismo origen, detras de nginx.
+      - ./deploy/transcode/hls-nginx.local.conf:/etc/nginx/conf.d/default.conf:ro
+
+volumes:
+  hls_data:

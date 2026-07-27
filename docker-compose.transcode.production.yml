@@ -1,0 +1,91 @@
+# Transcodificacion en produccion — nodo virtual "tc-main"
+#
+# Toma canales que el navegador NO puede reproducir y publica HLS H.264/AAC con
+# GOP cerrado de 2 s (lo que exige Media Source Extensions). Ver
+# docs/SOLUCIONES_PLAYBACK_NAVEGADOR.md y docs/PRUEBA_TRANSCODIFICACION.md.
+#
+# Stack SEPARADO a proposito: no toca docker-compose.production.yml. Se engancha
+# a la red que ya existe, y se retira entero sin tocar el stack vivo:
+#   Arrancar:  sudo docker compose -f docker-compose.transcode.production.yml up -d
+#   Retirar:   sudo docker compose -f docker-compose.transcode.production.yml down
+#
+# La salida NO se expone a internet: no publica puertos. Solo la alcanza
+# nexora_nginx, que la sirve bajo /stream/tc-main/ con su auth_request, igual
+# que cualquier otro canal. Sin token no hay video.
+#
+# Coste medido en este Xeon E5620 (4 nucleos):
+#   GAMATV      SD MPEG-2, ultrafast          0,34 nucleos
+#   GOLDEN_PLUS 1080p -> 720p, ultrafast      1,65 nucleos
+#   -----------------------------------------------------
+#   total                                     ~2,0 de 4
+# Los limites `cpus` son la red de seguridad: pase lo que pase, no se comen la
+# maquina que sirve la API.
+
+services:
+  tc_gamatv:
+    image: jrottenberg/ffmpeg:6.1-alpine
+    container_name: nexora_tc_gamatv
+    restart: unless-stopped
+    cpus: 0.9
+    networks: [nexora_net]
+    volumes:
+      - hls_data:/hls
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        mkdir -p /hls/GAMATV &&
+        exec ffmpeg -hide_banner -loglevel warning
+        -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5
+        -i http://181.78.246.211:8002/GAMATV/mpegts
+        -c:v libx264 -preset ultrafast -pix_fmt yuv420p
+        -b:v 1500k -maxrate 1700k -bufsize 3000k
+        -g 60 -keyint_min 60 -sc_threshold 0
+        -c:a aac -b:a 128k -ac 2
+        -f hls -hls_time 4 -hls_list_size 6
+        -hls_flags delete_segments+append_list+omit_endlist
+        -hls_segment_filename /hls/GAMATV/seg_%05d.ts
+        /hls/GAMATV/index.m3u8
+
+  tc_golden:
+    image: jrottenberg/ffmpeg:6.1-alpine
+    container_name: nexora_tc_golden
+    restart: unless-stopped
+    cpus: 2.2
+    networks: [nexora_net]
+    volumes:
+      - hls_data:/hls
+    entrypoint: ["/bin/sh", "-c"]
+    # 1080p -> 720p: escalar con veryfast costaba MAS que codificar a 1080p
+    # (2,61 contra 2,36 nucleos), asi que aqui manda ultrafast.
+    command:
+      - >-
+        mkdir -p /hls/GOLDEN_PLUS &&
+        exec ffmpeg -hide_banner -loglevel warning
+        -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5
+        -i http://181.78.246.211:8002/GOLDEN_PLUS/mpegts
+        -vf scale=1280:720
+        -c:v libx264 -preset ultrafast -pix_fmt yuv420p
+        -b:v 2500k -maxrate 2800k -bufsize 5000k
+        -g 60 -keyint_min 60 -sc_threshold 0
+        -c:a aac -b:a 128k -ac 2
+        -f hls -hls_time 4 -hls_list_size 6
+        -hls_flags delete_segments+append_list+omit_endlist
+        -hls_segment_filename /hls/GOLDEN_PLUS/seg_%05d.ts
+        /hls/GOLDEN_PLUS/index.m3u8
+
+  hls:
+    image: nginx:1.27-alpine
+    container_name: nexora_hls
+    restart: unless-stopped
+    networks: [nexora_net]
+    volumes:
+      - hls_data:/usr/share/nginx/html:ro
+      - ./deploy/transcode/hls-nginx.conf:/etc/nginx/conf.d/default.conf:ro
+
+networks:
+  nexora_net:
+    external: true
+    name: nexora_api_nexora_net
+
+volumes:
+  hls_data:
