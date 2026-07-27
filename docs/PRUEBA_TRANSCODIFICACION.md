@@ -128,10 +128,22 @@ Dos canales, uno de cada problema, para cubrir los dos modos de fallo:
 
 | Canal | Origen | Perfil | Coste medido |
 |---|---|---|---|
-| **GAMA TV** (44) | satélite MPEG-2 | `ultrafast`, sin escalar | **33 % de un núcleo** |
-| **ECUADOR TV** (30) | satélite MPEG-2 | `ultrafast`, sin escalar | **44 %** |
-| **GOLDEN PLUS** (5) | TelecoWR 1080p, GOP roto | 720p `ultrafast` | **144 %** |
-| | | **total** | **≈ 2,2 de 4 núcleos** |
+| **GAMA TV** (44) | satélite MPEG-2 | `ultrafast`, sin escalar | **39 % de un núcleo** |
+| **ECUADOR TV** (30) | satélite MPEG-2 | `ultrafast`, sin escalar | **43 %** |
+| **RCN COL** (38) | satélite MPEG-2 | `ultrafast`, sin escalar | **33 %** |
+| **CARACOL COL** (28) | satélite MPEG-2 | `ultrafast`, sin escalar | **35 %** |
+| **GOLDEN PLUS** (5) | TelecoWR 1080p, GOP roto | 720p `ultrafast` | **174 %** |
+| | | **total** | **≈ 3,3 de 8 hilos** |
+
+> **Ojo al denominador:** `nproc` devuelve **8** —4 núcleos físicos con Hyper-Threading—, así
+> que la carga se lee contra 8, no contra 4. Con los cinco canales arriba, `top` reporta
+> **64 % de CPU ociosa** y `/health` responde en **0,08 s**. Queda margen.
+
+RCN y CARACOL no fallaban por estar mal mapeados: el catálogo apuntaba bien y las fuentes
+estaban vivas. Son **`mpeg2video` 720x480** —satélite puro— y el navegador no las decodifica.
+Sus segmentos incluso arrancaban en keyframe, lo que no sirve de nada si el códec no se
+soporta. `CARACOL_INTERNACIONAL` es otro stream distinto, desactivado, con fuente SRT caída:
+no confundirlo con `CARACOL-COL`.
 
 ### ECUADOR TV: hubo que reparar la fuente antes
 
