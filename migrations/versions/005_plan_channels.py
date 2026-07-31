@@ -50,11 +50,16 @@ def upgrade() -> None:
             nullable=True,
         ),
     )
-    op.create_index(
+    # NOTE: a plain unique INDEX is not the same thing as a unique CONSTRAINT
+    # in Postgres. app/services/plan_channel_service.py upserts with
+    # `INSERT ... ON CONFLICT ON CONSTRAINT uq_plan_channels_plan_channel`,
+    # which requires a real constraint — Postgres raises
+    # `UndefinedObject: constraint "..." does not exist` against a bare
+    # unique index sharing that name. Must be created as a constraint.
+    op.create_unique_constraint(
         "uq_plan_channels_plan_channel",
         "plan_channels",
         ["plan_id", "channel_id"],
-        unique=True,
     )
     op.create_index("ix_plan_channels_plan_id", "plan_channels", ["plan_id"])
     op.create_index("ix_plan_channels_channel_id", "plan_channels", ["channel_id"])
@@ -63,5 +68,5 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_index("ix_plan_channels_channel_id", "plan_channels")
     op.drop_index("ix_plan_channels_plan_id", "plan_channels")
-    op.drop_index("uq_plan_channels_plan_channel", "plan_channels")
+    op.drop_constraint("uq_plan_channels_plan_channel", "plan_channels", type_="unique")
     op.drop_table("plan_channels")
