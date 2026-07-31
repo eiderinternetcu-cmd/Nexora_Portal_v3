@@ -27,3 +27,6 @@ venv/
 # Deploy scripts con rutas/info del servidor
 mcp_server/_check_build.py
 .ssh_known_hosts
+
+# Estado operativo de oh-my-claudecode (handoffs, planes, logs de sesion)
+.omc/

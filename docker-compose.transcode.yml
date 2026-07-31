@@ -10,6 +10,18 @@
 #   Parar:     docker compose -f docker-compose.transcode.yml down -v
 #
 # Coste medido en el Xeon E5620 de produccion: 0,98 nucleos por canal SD.
+#
+# NO ARRANCAR ESTO EN UNA MAQUINA DE DESARROLLO CUALQUIERA (2026-07-31).
+# La cabecera 181.78.246.211 filtra por IP de origen (ver "Requisito externo"
+# en docs/PRUEBA_TRANSCODIFICACION.md): sin whitelist del NOC, el TCP a :8002
+# ni siquiera responde. `nexora_transcoder` quedo en crash-loop (346+
+# reinicios, exit 146) con "Connection to tcp://181.78.246.211:8002 failed:
+# Operation timed out" repitiendose en el log — no es un fallo de config local,
+# es que esta IP de desarrollo no esta en la lista blanca de la cabecera de
+# Esmeraldas. Este stack solo tiene sentido corriendolo desde una maquina/VPN
+# cuya IP el NOC ya haya autorizado. Se dejo parado (`docker stop
+# nexora_transcoder`) a proposito: no lo relances con `up -d` sin resolver eso
+# primero, o volvera a entrar en el mismo bucle.
 
 services:
   transcoder:
