@@ -35,6 +35,30 @@ class Settings(BaseSettings):
     login_lockout_minutes: int = 15
     rate_limit_per_minute: int = 60
 
+    # ── Admin login lockout (NX-AUTH) ────────────────────────────────────────
+    # Hardened, per-USERNAME lockout for /api/{v1,admin}/auth/login.
+    #
+    # Why per username and not per IP: the IP axis is already covered by
+    # RateLimitMiddleware (10 req/min on the login path), and the IP it sees
+    # comes from X-Forwarded-For — a client-controlled header. An IP-keyed
+    # lockout is therefore both EVADABLE (rotate the header) and ABUSABLE (spoof
+    # a victim's address to lock *them* out of the admin panel). The username is
+    # the axis a brute force actually has to commit to, so that is what we count.
+    #
+    # Default False = today's behavior byte for byte: the legacy username+IP
+    # counters in AuthService stay in charge and still answer 423. Flipping this
+    # to True swaps in the per-username policy below, whose refusal is
+    # INDISTINGUISHABLE from a wrong password (same 401, same body), so it leaks
+    # neither account existence nor lockout state.
+    #
+    # The two Redis namespaces are disjoint (`nexora:lockout:{user}` legacy vs
+    # `nexora:lockout:admin:{user}` hardened), so toggling the flag never
+    # inherits a stale counter in either direction.
+    login_lockout_enabled: bool = False
+    login_lockout_max_attempts: int = 5        # consecutive failures that trigger the block
+    login_lockout_window_seconds: int = 900    # failures counted within this window (from the 1st)
+    login_lockout_duration_seconds: int = 900  # how long the account stays blocked
+
     # Browser CORS. The player and the admin panel are normally served from the
     # SAME origin as the API (nginx proxies /api/), so no preflight happens and
     # this list never comes into play; it only matters when a frontend lives on
@@ -141,6 +165,43 @@ class Settings(BaseSettings):
     flussonic_mgmt_base_url: str = ""
     flussonic_co_main_mgmt_base_url: str = ""
     flussonic_ec_quito_mgmt_base_url: str = ""
+
+    # ── Node health probing (P0.5) ────────────────────────────────────────────
+    # The `api` container has NO route to the Flussonic origins
+    # (181.78.246.211:8002, 38.210.187.13:8002 → timeout / HTTP 000); only Nginx
+    # (the edge) does, which is why playback works while the management-API probe
+    # reports every node down and floods the alerting with false "node down".
+    #   origin      → today's probe: GET <mgmt_base_url>/flussonic/api/v3/streams
+    #                 from the backend (unreachable in the current topology).
+    #   hls_signed  → the monitor mints a playback token with the SAME issuer the
+    #                 /stream/* gate validates and asks the EDGE for a signed HLS
+    #                 manifest (<edge>/stream/<node>/<stream>/index.m3u8?token=…),
+    #                 expecting 2xx. One end-to-end signal covering gate + node +
+    #                 stream. It reports no stream_count (no management API).
+    # Default "origin" = byte-identical to today, so deploying changes nothing
+    # until the flag is flipped.
+    node_probe_mode: str = "origin"                      # origin | hls_signed
+    node_probe_edge_base_url: str = "http://nexora_nginx"  # edge as seen from the api container
+    node_probe_timeout_seconds: float = 8.0
+    # Optional pin, CSV of "node_id:stream_key" (e.g. "ec-main:tvn,co-main:caracol").
+    # Empty (default) → the probe picks the lowest-numbered active channel of the
+    # node from the catalog.
+    node_probe_streams: str = ""
+
+    @property
+    def node_probe_stream_map(self) -> dict[str, str]:
+        """NODE_PROBE_STREAMS as {node_id → stream_key}.
+
+        Same CSV discipline as PLAYBACK_HOST_ALLOWLIST: parsed here, never
+        derived from request data. Malformed entries are ignored.
+        """
+        out: dict[str, str] = {}
+        for raw in self.node_probe_streams.split(","):
+            node, _, stream = raw.partition(":")
+            node, stream = node.strip(), stream.strip()
+            if node and stream:
+                out.setdefault(node, stream)
+        return out
 
     @property
     def is_production(self) -> bool:
