@@ -30,7 +30,7 @@ python scripts/dev_server.py
 API: http://localhost:8000  
 Docs interactivos: http://localhost:8000/docs
 
-Produccion: ver `PRODUCTION_NEXORAPLAY.md` para el deploy de
+Produccion: ver `docs/PRODUCTION_NEXORAPLAY.md` para el deploy de
 `nexoraplay.net` con Docker Compose, Nginx, Certbot/HTTPS y UFW.
 
 ## Web Player
@@ -74,11 +74,11 @@ Acceso multi-dispositivo validado: Windows (`http://127.0.0.1:5173`) y Mac en LA
 | Archivo | Contenido |
 |---------|-----------|
 | PROJECT_STATUS.md | Estado actual, archivos, endpoints, mapeo de canales |
-| ARCHITECTURE.md | Stack, flujos, Redis keys, modelo de seguridad Flussonic |
-| TODO_NEXT.md | Próximos pasos (Fase 4: hls.js browser, signed URLs, multi-node) |
-| SETUP.md | Variables .env, comandos, curl tests |
-| PRODUCTION_NEXORAPLAY.md | Deploy de produccion para nexoraplay.net, TLS, Nginx y UFW |
-| DECISIONS.md | Decisiones técnicas y reglas del proyecto |
+| docs/ARCHITECTURE.md | Stack, flujos, Redis keys, modelo de seguridad Flussonic |
+| docs/TODO_NEXT.md | Próximos pasos (Fase 4: hls.js browser, signed URLs, multi-node) |
+| docs/SETUP.md | Variables .env, comandos, curl tests |
+| docs/PRODUCTION_NEXORAPLAY.md | Deploy de produccion para nexoraplay.net, TLS, Nginx y UFW |
+| docs/DECISIONS.md | Decisiones técnicas y reglas del proyecto |
 | web_player/README.md | Integración web player con Flussonic |
 
 ## Estructura de dominios

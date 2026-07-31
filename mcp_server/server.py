@@ -96,23 +96,23 @@ def read_project_status() -> str:
 
 @mcp.tool()
 def read_architecture() -> str:
-    """Lee ARCHITECTURE.md — stack, estructura de carpetas, flujos, Redis keys, Alembic."""
-    p = PROJECT_ROOT / "ARCHITECTURE.md"
-    return p.read_text(encoding="utf-8") if p.exists() else "ARCHITECTURE.md not found."
+    """Lee docs/ARCHITECTURE.md — stack, estructura de carpetas, flujos, Redis keys, Alembic."""
+    p = PROJECT_ROOT / "docs" / "ARCHITECTURE.md"
+    return p.read_text(encoding="utf-8") if p.exists() else "docs/ARCHITECTURE.md not found."
 
 
 @mcp.tool()
 def read_todo_next() -> str:
-    """Lee TODO_NEXT.md — próximos pasos exactos, comandos y pendientes de Fase 2."""
-    p = PROJECT_ROOT / "TODO_NEXT.md"
-    return p.read_text(encoding="utf-8") if p.exists() else "TODO_NEXT.md not found."
+    """Lee docs/TODO_NEXT.md — próximos pasos exactos, comandos y pendientes de Fase 2."""
+    p = PROJECT_ROOT / "docs" / "TODO_NEXT.md"
+    return p.read_text(encoding="utf-8") if p.exists() else "docs/TODO_NEXT.md not found."
 
 
 @mcp.tool()
 def read_decisions() -> str:
-    """Lee DECISIONS.md — decisiones técnicas, reglas del proyecto y restricciones."""
-    p = PROJECT_ROOT / "DECISIONS.md"
-    return p.read_text(encoding="utf-8") if p.exists() else "DECISIONS.md not found."
+    """Lee docs/DECISIONS.md — decisiones técnicas, reglas del proyecto y restricciones."""
+    p = PROJECT_ROOT / "docs" / "DECISIONS.md"
+    return p.read_text(encoding="utf-8") if p.exists() else "docs/DECISIONS.md not found."
 
 # ─────────────────────────────────────────────────────────────────────────────
 # File system

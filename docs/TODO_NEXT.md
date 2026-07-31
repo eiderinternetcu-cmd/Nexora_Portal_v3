@@ -1,8 +1,8 @@
 # TODO_NEXT.md — Foco actual
 _Last updated: 2026-07-14_
 
-> 📍 **El roadmap completo de lo pendiente vive en [`docs/ROADMAP.md`](docs/ROADMAP.md).**
-> Este archivo es solo el **foco inmediato** + reglas del proyecto. Si hay conflicto, manda `docs/ROADMAP.md`.
+> 📍 **El roadmap completo de lo pendiente vive en [`ROADMAP.md`](ROADMAP.md).**
+> Este archivo es solo el **foco inmediato** + reglas del proyecto. Si hay conflicto, manda `ROADMAP.md`.
 
 ---
 
@@ -34,7 +34,7 @@ token de 60 s superado sin corte, cross-stream/otro-node → 401, logs sin token
    fallback al grant ante token expirado. Cambio de código + tests.
 4. **Alerta de nodo/stream caído** (co-main).
 
-Detalle, dependencias y el resto (staging real, stress, Lua, observabilidad, EPG, RBAC, VOD…) → **[`docs/ROADMAP.md`](docs/ROADMAP.md)**.
+Detalle, dependencias y el resto (staging real, stress, Lua, observabilidad, EPG, RBAC, VOD…) → **[`ROADMAP.md`](ROADMAP.md)**.
 
 ---
 
