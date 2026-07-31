@@ -638,6 +638,285 @@ reload — y ese es precisamente el estado de producción hoy.
 
 ---
 
+## 9. Caché de segmentos HLS (P1.6) — PREPARADO, SIN DESPLEGAR
+
+> **Estado: el cambio está en el repositorio y validado en laboratorio. NADIE lo
+> ha aplicado a producción.** Antes de aplicarlo hay que comparar contra el conf
+> vivo (sección 0: producción no es un repositorio git y el nginx en marcha puede
+> haber divergido del versionado).
+
+### 9.1 Qué problema resuelve
+
+Desde que `/stream/*` pasó a ser same-origin, el edge dejó de redirigir y pasó a
+**relevar**: hace `proxy_pass` de cada segmento al origen, con `proxy_buffering
+off` y sin una sola directiva `proxy_cache`. Consecuencia: diez espectadores del
+mismo canal eran diez tiradas independientes contra una cabecera que ya va al
+74 % de CPU y 191,9 Mbps. **El sistema escalaba con el número de espectadores, no
+con el de canales**, y el límite por plan no protege de eso (cincuenta clientes
+viendo el mismo partido con una conexión cada uno producen el mismo problema).
+
+Los `.ts` de HLS son inmutables, así que N espectadores de un canal deben
+colapsar en **una** tirada al origen. Ver `docs/ROADMAP.md` § P1.6.
+
+### 9.2 Qué se cachea y con qué vida
+
+| Recurso | TTL | Por qué ese número |
+|---|---|---|
+| Segmentos (`.ts`) | **30 s** | La ventana de directo que el origen publica es `hls_time 4` × `hls_list_size 6` = **24 s** (valores reales de `docker-compose.transcode.production.yml`, con GOP cerrado `-g 60 -keyint_min 60 -sc_threshold 0`). Dos espectadores del mismo canal pueden ir desfasados hasta esos 24 s, así que para que **compartan entrada** el TTL tiene que cubrir la ventana entera. 30 s = 24 s + un segmento y pico de margen para reintentos y rebuffering. Y no más: con `-hls_flags delete_segments` el origen borra el segmento a los ~28 s, y ningún cliente puede pedir algo que ya no aparece en ningún manifiesto — un TTL de 5 minutos solo ocuparía 10× más disco reteniendo bytes que nadie va a volver a pedir. |
+| Manifiesto (`.m3u8`, `.mpd`) | **0 s — no se cachea** | Es lo contrario del segmento: **mutable**. El origen lo reescribe cada 4 s. Servirlo con cualquier antigüedad congela el directo y puede apuntar a segmentos ya borrados (404 en mitad de la reproducción). Se fuerza con `proxy_cache_bypass` + `proxy_no_cache` sobre el map `$stream_is_manifest` (hacen falta **las dos**: `bypass` no lee, `no_cache` no escribe). |
+| `404` del origen | **1 s** | Para que un canal caído no se convierta en una tormenta de 404 contra la cabecera. 1 s es menos de un cuarto de segmento: no retrasa la recuperación de forma perceptible. |
+
+**Por qué el manifiesto es 0 y no "1 s":** nginx **no admite variables en
+`proxy_cache_valid`**. Dar TTLs distintos a `.m3u8` y `.ts` obliga a una location
+anidada por extensión, y una location por **regex** no admite `proxy_pass` con
+parte de URI — justo el `/` final que recorta el prefijo `/stream/<nodo>/`.
+Habría que reproducir ese recorte con un `rewrite ... break` explícito en **ocho**
+sitios (4 nodos × 2 vhosts), cada uno una oportunidad de mandar al origen un path
+mal recortado *solo* para manifiestos. Un manifiesto son ~300 bytes cada 4 s: no
+justifica ese riesgo. Todo el ahorro de ancho de banda está en los segmentos.
+
+### 9.3 El gate NO se debilita — y está comprobado, no supuesto
+
+**La caché no puede saltarse `auth_request`.** nginx resuelve `auth_request` en la
+fase **ACCESS** y la búsqueda en caché ocurre en la fase **CONTENT** (dentro del
+módulo upstream). ACCESS corre **siempre** antes que CONTENT, así que el
+subrequest a FastAPI se ejecuta en **todas** las peticiones, acierten o no en
+caché. Se cachea la **respuesta del origen**, jamás la autorización.
+
+Esto se verificó en un contenedor `nginx:1.27-alpine` real (misma versión que
+producción), no se dio por bueno leyendo la documentación:
+
+```
+# Segmento caliente en caché, token INVÁLIDO:
+"GET /stream/ec-main/chan1/seg001.ts" 401 62 cache=-
+# Segmento caliente en caché, SIN token:
+"GET /stream/ec-main/chan1/seg001.ts" 401 62 cache=-
+```
+
+El `cache=-` es la prueba: la petición **nunca llegó a la fase de contenido**, se
+cortó antes en el gate. Y el contador del backend de autorización mostró
+**6 subrequests para 6 peticiones** — uno por petición, incluida la que se sirvió
+desde caché (`cache=HIT`). No hay ni una petición servida sin autorizar.
+
+> Si en una versión futura de nginx esto dejara de cumplirse, el síntoma sería un
+> 200 con `cache=HIT` y un token inválido. **Ese es el test que hay que repetir en
+> cada actualización de la imagen de nginx** (§ 9.7).
+
+### 9.4 La clave de caché no lleva el token
+
+```nginx
+proxy_cache_key $proxy_host$uri;
+```
+
+El valor **por defecto de nginx** es `$scheme$proxy_host$request_uri`, y
+`$request_uri` **incluye la query string**. Con el default, el `?token=...` de
+cada espectador entraría en la clave: cada uno tendría su propia entrada, el
+acierto sería 0 % y habríamos gastado disco y complejidad para nada.
+
+`$uri` es el path normalizado **sin** query string:
+`/stream/<nodo>/<stream>/<segmento>.ts`. Es decir, la clave identifica el
+**recurso**, no a quién lo pide.
+
+**Este punto y el anterior tiran en direcciones opuestas a propósito, y se
+resuelven porque son cosas distintas:** el token decide *quién puede leer* (lo
+evalúa `auth_request`, en cada petición, fase ACCESS); la clave decide *qué bytes
+son* (fase CONTENT). Que dos espectadores con tokens distintos compartan entrada
+es el objetivo, no un efecto colateral — porque cada uno ha pasado su propio
+control de acceso antes de llegar a la caché.
+
+Detalles deliberados de la clave:
+- **`$proxy_host`** desambigua los cuatro orígenes. Es redundante con el `<nodo>`
+  que ya va en `$uri`; se deja como cinturón y tirantes.
+- **No lleva `$host`**: los dos vhosts piden **exactamente los mismos bytes al
+  mismo origen**, así que compartir entrada entre marcas multiplica el acierto en
+  vez de partirlo en dos. No hay fuga posible: el contenido de un `.ts` no depende
+  del dominio por el que se pidió. Verificado: una petición por
+  `tvdigital.laredtelco.com` da `cache=HIT` sobre una entrada calentada por
+  `nexoraplay.net`, y sigue dando 401 con token inválido.
+
+### 9.5 Colapso de peticiones concurrentes
+
+`proxy_cache_lock on` es lo que cumple el AC de verdad. Sin él la caché solo
+ayuda a partir de la **segunda** petición: N espectadores pidiendo el mismo
+segmento **frío a la vez** producirían N tiradas simultáneas al origen — que es
+exactamente el escenario que duele (todos viendo el mismo partido).
+
+Medido con 12 peticiones concurrentes de un segmento frío:
+
+```
+     11 status=200 1500000 cache=HIT
+      1 status=200 1500000 cache=MISS
+-- tiradas al origen: 1
+-- subrequests de autorización: 12
+```
+
+**12 espectadores → 1 conexión al origen → 12 autorizaciones.** Es el AC de P1.6.
+
+### 9.6 Dimensionado
+
+```nginx
+proxy_cache_path /var/cache/nginx/hls
+                 levels=1:2
+                 keys_zone=hls_cache:4m
+                 max_size=1g
+                 inactive=45s
+                 use_temp_path=off;
+```
+
+La aritmética, no un valor copiado de un blog:
+
+- Segmento = `hls_time 4 s` × ~3 Mbps de media = 12 Mbit ≈ **1,5 MB**.
+- TTL 30 s → 30/4 ≈ 8 segmentos vivos por canal ≈ 12 MB.
+- `inactive=45s` (apenas por encima del TTL) acota lo que queda en disco ya
+  expirado: 45/4 ≈ 11 segmentos ≈ **17 MB por canal**.
+- Peor caso absoluto, **los 41 canales vistos a la vez**: 41 × 17 MB ≈ **692 MB**.
+- **`max_size=1g`** deja ~45 % de margen sobre ese peor caso y es un techo
+  **duro** (el cache manager desaloja por LRU). Producción es una VPS: un
+  gigabyte acotado y predecible, no "el disco que haya".
+- **`keys_zone=4m`** ≈ 32.000 claves (nginx: ~8.000 claves por MB) contra un
+  conjunto de trabajo calculado de ~460. 70× de margen por 4 MB de memoria
+  compartida. Si la zona se llenara, nginx desaloja a la fuerza y el acierto
+  caería **en silencio**: esos 4 MB son el seguro más barato de toda la config.
+- **`use_temp_path=off`**: sin esto nginx escribe en `proxy_temp_path` y luego
+  **copia** el archivo a la caché (dos escrituras por segmento). Con `off`, el
+  temporal nace en el mismo sistema de archivos y el paso final es un `rename`.
+
+**nginx crea `/var/cache/nginx/hls` solo al arrancar** (verificado: aparece con
+dueño `nginx`). No hay que crearlo a mano ni montar nada.
+
+**Opción si preocupa el desgaste del SSD.** Con ~20 canales concurrentes el edge
+escribiría ~7,5 MB/s sostenidos (~650 GB/día). Si eso importa en esta VPS, monta
+el directorio como tmpfs añadiendo al servicio nginx del compose de producción:
+
+```yaml
+    tmpfs:
+      - /var/cache/nginx/hls:size=1g,mode=0700
+```
+
+**No se hace por defecto** porque quedarse sin RAM tumba la VPS entera y quedarse
+sin disco no. Decisión del dueño, que es quien conoce la RAM de la máquina.
+
+### 9.7 Verificar en producción (después de aplicar)
+
+El acierto **no se expone como cabecera de respuesta**. `add_header` no se fusiona
+entre niveles en nginx: declarar `X-Cache-Status` dentro de las locations de
+`/stream/*` **borraría** las cabeceras de `security-headers.conf` y el HSTS del
+vhost para todas las respuestas de vídeo. En su lugar se añadió `cache=` al
+`log_format stream_safe`, que ya era el formato dedicado a esas locations.
+
+```bash
+# 1. El mismo segmento dos veces -> la segunda debe decir HIT.
+#    (sustituye STREAM/SEGMENTO y TOKEN por valores vivos)
+for i in 1 2; do
+  curl -s -o /dev/null "https://nexoraplay.net/stream/tc-main/STREAM/SEGMENTO.ts?token=TOKEN"
+done
+docker logs --tail 20 nexora_nginx | grep 'SEGMENTO.ts'
+# Se espera:  ... 200 <bytes> cache=MISS
+#             ... 200 <bytes> cache=HIT
+
+# 2. EL QUE NO PUEDE FALLAR: token inválido sobre un segmento CALIENTE.
+curl -s -o /dev/null -w '%{http_code}\n' \
+  "https://nexoraplay.net/stream/tc-main/STREAM/SEGMENTO.ts?token=invalido"
+# Se espera 401.  Un 200 aquí es un BYPASS DEL GATE: revierte de inmediato (§ 9.9).
+
+# 3. El manifiesto NO debe cachearse nunca.
+docker logs --tail 50 nexora_nginx | grep '.m3u8'
+# Se espera cache=BYPASS en todas.  Un cache=HIT en un .m3u8 congela el directo.
+
+# 4. La caché ocupa algo y no se desmadra.
+docker exec nexora_nginx du -sh /var/cache/nginx/hls
+# Debe quedarse holgadamente por debajo de 1G.
+```
+
+### 9.8 Antes de aplicarlo — comparar contra el conf vivo
+
+**Producción no es un repositorio git.** El archivo que corre puede haber
+divergido del versionado (sección 0). Antes de copiar nada:
+
+```bash
+# ¿En qué se diferencia lo que corre de lo que hay en el repo?
+docker exec nexora_nginx cat /etc/nginx/conf.d/default.conf > /tmp/vivo.conf
+diff /tmp/vivo.conf /opt/nexora_api/deploy/nginx/nexoraplay.conf
+```
+
+Si el `diff` muestra algo más que el bloque de caché de P1.6, **para**: hay
+cambios en producción que no están en el repo y copiar el archivo los borraría.
+Guarda siempre la copia de seguridad de la sección 4A antes de tocar.
+
+### 9.9 Revertir
+
+La caché es **puramente aditiva**: quitarla devuelve el edge exactamente al
+comportamiento anterior (relé sin caché). No hay migración, ni estado que
+conservar, ni nada que se pierda — lo único que se tira es la caché en disco.
+
+**Reversión completa (la vía recomendada, un solo paso):** es el rollback normal
+de la sección 7A, restaurando la copia previa al cambio.
+
+```bash
+sudo cp /root/edge-backup-<FECHA>.conf /opt/nexora_api/deploy/nginx/nexoraplay.conf
+docker exec nexora_nginx nginx -t && docker exec nexora_nginx nginx -s reload
+```
+
+**Desactivar la caché sin revertir el archivo** (útil para descartarla como causa
+de una incidencia sin deshacer nada más). Basta con **una línea** en el bloque
+`http{}`: hacer que el map de manifiestos valga 1 siempre.
+
+```nginx
+# Desactiva la caché en los cuatro nodos y los dos vhosts de golpe: fuerza el
+# bypass para TODO, no solo para los manifiestos. Las locations no se tocan.
+map $uri $stream_is_manifest {
+    default 1;
+}
+```
+
+```bash
+docker exec nexora_nginx nginx -t && docker exec nexora_nginx nginx -s reload
+```
+
+Todas las peticiones pasarán a `cache=BYPASS` y el edge volverá a ir directo al
+origen. **El gate sigue funcionando igual** en los dos casos: nunca dependió de
+la caché.
+
+> ⚠ Lo que **no** se debe hacer para revertir es borrar solo el `proxy_cache_path`
+> del bloque `http{}`: las ocho locations seguirían con `proxy_cache hls_cache;`
+> apuntando a una zona inexistente y **nginx no arrancaría**, tirando los dos
+> dominios. Si ya pasó, es el caso de crashloop de la sección 7B.
+
+**Vaciar la caché sin tocar la configuración** (por ejemplo, si se sospecha de un
+segmento corrupto):
+
+```bash
+docker exec nexora_nginx sh -c 'rm -rf /var/cache/nginx/hls/*'
+docker exec nexora_nginx nginx -s reload
+```
+
+### 9.10 Qué queda pendiente
+
+- **Aplicarlo.** Nada de esto está en producción todavía.
+- **Las ocho copias.** El archivo único `nexoraplay.conf` lleva el bloque de caché
+  expandido 8 veces (4 nodos × 2 vhosts) porque **no existe el generador** que
+  menciona su cabecera (`scratchpad/generar_conf.py` no está en el repositorio).
+  La fuente de verdad es `snippets/stream-cache.conf`: **si tocas una copia,
+  tócalas las ocho**. Es el mismo patrón de divergencia que produjo el caso de
+  tc-mia.
+- **`resolver` fuera del repositorio.** Al montar el banco de pruebas salió que el
+  `proxy_pass` de `/__stream_auth` lleva variables (`$stream_node_v`), y en cuanto
+  `proxy_pass` contiene una variable nginx abandona la resolución en tiempo de
+  carga y **exige un `resolver`** para el nombre del upstream. El gate funciona en
+  producción, así que ese `resolver` tiene que estar en el `nginx.conf` principal
+  — que **no está versionado en este repositorio** (solo hay `conf.d/` y
+  `snippets/`). Es una dependencia preexistente, no la introduce la caché, pero
+  conviene versionar ese archivo antes de que alguien recree el contenedor.
+- **Medir el ahorro real.** El AC está probado en laboratorio (12 → 1). Falta la
+  cifra en producción: comparar Mbps de entrada en la cabecera antes y después,
+  que es el número que decide si P1.6 basta o hace falta además una CDN.
+- **Ventana de aplicación.** Aplicarlo recarga nginx; el reload es seguro
+  (sección 5.2), pero cambia `proxy_buffering off` → `on` en las rutas de vídeo,
+  que es el único cambio de comportamiento de red del parche. Conviene una franja
+  con pocos espectadores para poder observar.
+
+---
+
 ## Anexo A · Validar sin tocar producción
 
 Todo lo marcado **[VERIF-LAB]** en este documento se comprobó así. Ejecútalo
