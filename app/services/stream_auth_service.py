@@ -412,6 +412,16 @@ class StreamAuthService:
           7. client IP binding (C-PROD-2) per playback_ip_binding_mode
         Returns a SAFE payload dict (incl. session_id). Raises 401/403 on failure.
         """
+        # 0. Node allowlist (NX-NODE). `node` is a PATH SEGMENT of the incoming
+        # /stream/<node>/<stream_key>/… URL, so it is attacker-controlled and was
+        # never validated against anything. Rejecting an unlisted node here — before
+        # the token is even decoded — keeps an unknown node out of token evaluation
+        # and out of the grant keyspace (key_stream_grant is keyed by node).
+        # Empty allowlist = feature off (default), node unchecked as today.
+        allowed_nodes = settings.playback_allowed_nodes
+        if node is not None and allowed_nodes and node not in allowed_nodes:
+            raise NexoraException(403, "Unknown stream node")
+
         if not token:
             raise NexoraException(401, "Missing playback token")
 
@@ -437,8 +447,19 @@ class StreamAuthService:
         if stream_key is not None and payload.get("sk") != stream_key:
             raise NexoraException(403, "Playback token not valid for this stream")
 
-        if node is not None and payload.get("node") not in (None, node):
-            raise NexoraException(403, "Playback token not valid for this node")
+        # Node binding (NX-NODE). Historically asymmetric with the stream_key
+        # check above: a token with NO 'node' claim passed on every node, while a
+        # token with no 'sk' was refused. Under PLAYBACK_NODE_BINDING_ENFORCE the
+        # node is checked exactly like the stream key; with the flag off the old
+        # tolerance is preserved byte for byte. See the flag's note in config.py
+        # for why closing it is expected to be a no-op for issued tokens.
+        token_node = payload.get("node")
+        if node is not None:
+            if settings.playback_node_binding_enforce:
+                if token_node != node:
+                    raise NexoraException(403, "Playback token not valid for this node")
+            elif token_node not in (None, node):
+                raise NexoraException(403, "Playback token not valid for this node")
 
         # 7. IP binding (C-PROD-2). off → skip; soft → warn; strict → 403 on mismatch.
         mode = settings.playback_ip_binding_mode

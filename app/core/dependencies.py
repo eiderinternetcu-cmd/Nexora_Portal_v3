@@ -1,3 +1,4 @@
+import ipaddress
 import uuid
 from fastapi import Depends, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -6,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 import redis.asyncio as aioredis
 
+from app.config import get_settings
 from app.database import get_db
 from app.redis_client import get_redis, key_blacklist, key_client
 from app.core.security import (
@@ -25,6 +27,8 @@ from app.core.exceptions import unauthorized, forbidden
 from app.models.user import User, UserRole
 from app.models.subscriber import Subscriber, SubscriberStatus
 from app.schemas.auth import TokenPayload
+
+settings = get_settings()
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -69,11 +73,77 @@ async def require_admin_or_reseller(user: User = Depends(get_current_user)) -> U
     return user
 
 
+def _is_ip(value: str) -> bool:
+    """Reject anything that is not a literal address.
+
+    A malformed header would otherwise become a Redis key fragment (rate limit,
+    lockout) and an audit row, letting a caller mint unbounded key names.
+    """
+    try:
+        ipaddress.ip_address(value)
+    except ValueError:
+        return False
+    return True
+
+
+def _is_trusted_proxy(peer: str) -> bool:
+    """True when the TCP peer is one of the proxies allowed to assert a client IP."""
+    networks = settings.trusted_proxy_networks
+    if not peer or not networks:
+        return False
+    try:
+        addr = ipaddress.ip_address(peer)
+    except ValueError:
+        return False
+    return any(addr in net for net in networks)
+
+
 def get_client_ip(request: Request) -> str:
+    """The caller's IP, as used for login lockout, rate limiting and audit rows.
+
+    NX-AUTH. The legacy implementation returned the FIRST value of
+    X-Forwarded-For, which the client writes. That made every per-IP control
+    evadable (a new fake address per request never fills a bucket) and, worse,
+    abusable: sending a colleague's address locks THEM out of the admin panel.
+
+    Under CLIENT_IP_SOURCE=edge the header is only believed when the connection
+    itself comes from a proxy listed in TRUSTED_PROXY_CIDRS:
+
+      1. X-Real-IP — what this project's nginx sets, from $remote_addr
+         (deploy/nginx/snippets/proxy-common.conf).
+      2. the LAST hop of X-Forwarded-For. A forwarded chain grows to the RIGHT,
+         so the rightmost entry is the one the closest trusted proxy wrote and
+         everything to its left is unverified client input. This project's nginx
+         overwrites the header with $remote_addr (a single hop), so both readings
+         agree there; reading from the right is what stays correct if a CDN is
+         ever put in front and the header starts arriving with several hops.
+      3. the peer address, when the trusted proxy sent no forwarded header.
+
+    From an UNTRUSTED peer no header is honored at all and the peer address is
+    used, so a spoofed header buys nothing. That is also what makes local
+    development keep working with no proxy in front: nothing is trusted, and the
+    connection address is the answer.
+
+    CLIENT_IP_SOURCE=legacy (default) keeps the old behavior byte for byte.
+    """
+    peer = request.client.host if request.client else ""
+
+    if settings.client_ip_source == "edge":
+        if _is_trusted_proxy(peer):
+            real_ip = (request.headers.get("X-Real-IP") or "").strip()
+            if _is_ip(real_ip):
+                return real_ip
+            forwarded = request.headers.get("X-Forwarded-For") or ""
+            hops = [hop.strip() for hop in forwarded.split(",") if hop.strip()]
+            if hops and _is_ip(hops[-1]):
+                return hops[-1]
+        # Untrusted peer, or a trusted proxy that asserted nothing usable.
+        return peer or "unknown"
+
     forwarded = request.headers.get("X-Forwarded-For")
     if forwarded:
         return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
+    return peer or "unknown"
 
 
 async def get_client_token_payload(

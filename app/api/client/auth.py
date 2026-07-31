@@ -5,7 +5,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.redis_client import get_redis
-from app.core.dependencies import get_current_subscriber, get_client_token_payload
+from app.core.dependencies import (
+    get_current_subscriber,
+    get_client_token_payload,
+    get_client_ip as _get_ip,
+)
 from app.models.subscriber import Subscriber
 from app.schemas.client import (
     ClientLoginRequest,
@@ -18,11 +22,8 @@ from app.services.client_auth_service import ClientAuthService
 router = APIRouter(prefix="/auth", tags=["Client Auth"])
 
 
-def _get_ip(request: Request) -> str:
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
+# _get_ip is app.core.dependencies.get_client_ip (NX-AUTH). It used to be a local
+# copy that read the FIRST X-Forwarded-For value, i.e. whatever the client typed.
 
 
 @router.post("/login", response_model=ClientTokenResponse)

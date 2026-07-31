@@ -5,6 +5,7 @@ from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
 
+from app.core.dependencies import get_client_ip
 from app.redis_client import get_redis, key_rate_limit
 from app.config import get_settings
 
@@ -70,7 +71,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
     @staticmethod
     def _get_ip(request: Request) -> str:
-        forwarded = request.headers.get("X-Forwarded-For")
-        if forwarded:
-            return forwarded.split(",")[0].strip()
-        return request.client.host if request.client else "unknown"
+        """Delegates to the single client-IP resolver (NX-AUTH).
+
+        This used to be a private copy that read the FIRST X-Forwarded-For value,
+        so the per-IP bucket was keyed by a header the caller writes: a fresh fake
+        address per request meant the login limit (10/min) never fired. Keeping
+        the resolver in one place is the point — fixing get_client_ip while this
+        copy survived would have left the rate limiter open.
+        """
+        return get_client_ip(request)

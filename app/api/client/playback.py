@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.database import get_db
 from app.redis_client import get_redis
-from app.core.dependencies import get_current_subscriber
+from app.core.dependencies import get_current_subscriber, get_client_ip as _get_ip
 from app.core.exceptions import NexoraException
 from app.models.subscriber import Subscriber
 from app.schemas.client import PlaybackAuthorizeRequest, PlaybackResponse
@@ -41,11 +41,9 @@ def _maybe_sign(playback_url: str | None, token: str) -> str | None:
     return f"{playback_url}{sep}token={token}"
 
 
-def _get_ip(request: Request) -> str:
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
+# _get_ip is app.core.dependencies.get_client_ip (NX-AUTH). It used to be a local
+# copy that read the FIRST X-Forwarded-For value, i.e. whatever the client typed —
+# which here also fed the 'cip' claim the /stream/* gate binds a token to.
 
 
 _FORWARDED_SCHEMES = ("http", "https")
