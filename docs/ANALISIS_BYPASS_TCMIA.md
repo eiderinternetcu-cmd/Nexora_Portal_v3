@@ -3,6 +3,13 @@
 _Análisis estático sobre código y config versionada. Rama `feat/client-api-blockers`.
 NO se tocó producción. Fecha: 2026-07-31._
 
+> **CASO CERRADO — ver [§8](#8-cierre-medición-en-producción-2026-07-31).** La sonda A se
+> ejecutó contra la config viva. El mecanismo de H1 (`location` ausente → SPA → 200 HTML)
+> queda **confirmado por artefacto de producción**; el fallo ya estaba **reparado** antes de
+> la medición. **No hubo fuga de vídeo**: impacto de disponibilidad, no de seguridad.
+> Las §§ 3 y 4 se conservan tal cual se escribieron, sin retocar, como registro del
+> razonamiento previo — pero **§8 corrige el «qué vhost» de H1**.
+
 Hallazgo de origen: [`ROADMAP_SESION_MULTIMARCA_ADMIN.md`](ROADMAP_SESION_MULTIMARCA_ADMIN.md) §3.1.
 
 ---
@@ -427,3 +434,219 @@ que las discrimina (§6, sondas A y B).
 
 Independientemente de cuál resulte, **§5.1, §5.3, §5.4, §5.5 y §5.6 valen igual**: son huecos
 confirmados por lectura de código, no dependen del veredicto.
+
+---
+
+## 8. Cierre: medición en producción (2026-07-31)
+
+Ejecutada la **sonda A** de §6 con autorización puntual del dueño, **solo lectura**, sobre
+`45.184.225.4`. No se escribió nada, no se recargó nginx, no se ejecutó la sonda B (el `curl`
+de playback quedó expresamente fuera de la autorización).
+
+### 8.1 Qué se midió
+
+**Comando base** (§6, sonda A) y variantes del mismo `grep` para poder **atribuir cada
+`location` a su vhost**:
+
+```bash
+sudo docker exec nexora_nginx nginx -T 2>/dev/null \
+  | grep -nE 'configuration file|server_name|include |location \^~ /stream/|auth_request '
+```
+
+Salida (censurada; recortada a lo pertinente):
+
+```
+  1:# configuration file /etc/nginx/nginx.conf:
+ 32:    include /etc/nginx/conf.d/*.conf;
+136:# configuration file /etc/nginx/conf.d/00-default-server.conf:
+158:    server_name _;
+186:    server_name _;
+242:# configuration file /etc/nginx/conf.d/laredtelco.conf:
+256:    server_name tvdigital.laredtelco.com;
+273:    server_name tvdigital.laredtelco.com;
+305:    include /etc/nginx/snippets/stream-gate.conf;      <-- vhost TLS marca nueva
+429:# configuration file /etc/nginx/snippets/stream-gate.conf:
+473:location ^~ /stream/ec-main/ {
+477:    auth_request /__stream_auth;
+496:location ^~ /stream/co-main/ {
+499:    auth_request /__stream_auth;
+529:location ^~ /stream/tc-main/ {
+532:    auth_request /__stream_auth;
+559:location ^~ /stream/tc-mia/ {
+562:    auth_request /__stream_auth;
+586:# configuration file /etc/nginx/conf.d/nexoraplay.conf:
+599:    server_name nexoraplay.net www.nexoraplay.net;
+618:    server_name nexoraplay.net www.nexoraplay.net;
+636:    include /etc/nginx/snippets/stream-gate.conf;      <-- vhost TLS marca vieja
+```
+
+> ⚠ **Trampa de lectura, y es la que decide.** El recuento global engaña: los cuatro
+> `location` aparecen **una sola vez** en el volcado porque `nginx -T` imprime **cada fichero
+> una vez**, no una vez por `include`. No significa «solo un vhost los tiene». Hay que seguir
+> los `include`: **ambos** vhosts TLS (líneas 305 y 636) incluyen **el mismo**
+> `snippets/stream-gate.conf`, así que **los dos heredan los cuatro nodos con su
+> `auth_request`**. Leer el recuento sin resolver los `include` habría dado el veredicto
+> contrario.
+
+### 8.2 ¿Diverge producción del repo?
+
+**No, en lo que se midió.** Comparados los directivos (sin comentarios ni blancos), contra el
+**commit `750992c` (HEAD de `feat/client-api-blockers`)** — no contra el working tree, ver el
+aviso de abajo:
+
+| Fichero | Repo @`750992c` | Vivo | Resultado |
+|---|---|---|---|
+| `snippets/stream-gate.conf` | 84 directivas | 84 directivas | **idénticos** |
+| `conf.d/nexoraplay.conf` | 37 directivas | 37 directivas | **idénticos** |
+| `conf.d/laredtelco.conf` | 28 directivas | 28 directivas | **idénticos** |
+
+> ⚠ **La referencia es HEAD, y hay que decirlo.** Durante esta sesión el *working tree* recibió
+> un cambio **sin commitear** de otro frente (P1.6, caché de segmentos): mete
+> `include snippets/stream-cache.conf` en las cuatro locations de nodo y quita el
+> `proxy_buffering off`. **Eso todavía NO está desplegado** — el snippet vivo tiene
+> 4 × `proxy_buffering off` y 0 referencias a `stream-cache`. Comparar contra el working tree
+> daría una divergencia **falsa**, atribuible a trabajo en vuelo y no a deriva de producción.
+> Cuando P1.6 se despliegue, esta tabla habrá que rehacerla.
+
+**Pero sí hay una divergencia estructural que importa:** lo desplegado es el layout
+`conf.d/` + `snippets/`. El monolito versionado **`deploy/nginx/nexoraplay.conf` (939 líneas)
+NO está desplegado** — el `conf.d/nexoraplay.conf` vivo tiene 78. Ese monolito, que duplica el
+gate *inline* en cada `server{}`, es **material muerto en el repo** y es la fuente de la que
+§3 dedujo el modelo equivocado (ver §8.4). Conviene retirarlo o marcarlo como obsoleto.
+
+### 8.3 Veredicto: **refutada por la letra del criterio, confirmada en el mecanismo**
+
+El criterio fijado de antemano era binario:
+
+- *si algún `server_name` no lleva los cuatro nodos* → confirmada;
+- *si los dos vhosts llevan los cuatro con su `auth_request`* → refutada.
+
+Medido: **los dos vhosts llevan los cuatro con `auth_request`**. Por la letra del criterio,
+**H1 queda REFUTADA**. Se respeta el criterio y no se mueve.
+
+**Y sin embargo el criterio no tenía rama para lo que se encontró**: asumía que, si el fallo
+había existido, **seguiría vivo**. No sigue vivo — **fue reparado antes de la medición**, y el
+artefacto previo a la reparación **sigue en disco**. Ese artefacto responde la pregunta que el
+criterio intentaba inferir del estado actual:
+
+```bash
+sudo docker exec nexora_nginx ls -l --full-time /etc/nginx/snippets/
+```
+
+```
+-rw-rw-r--  1000 1000  7397  2026-07-27 15:48:45 +0000  stream-gate.conf
+-rw-r--r--  root root  6046  2026-07-27 15:48:45 +0000  stream-gate.conf.bak-20260727-1500
+-rw-rw-r--  1000 1000   884  2026-07-27 03:17:04 +0000  app-locations.conf
+(… el resto de snippets y todo conf.d/: 2026-07-27 03:17 …)
+```
+
+Y el contenido de esa copia de seguridad —la que estuvo **en vigor** entre las 03:17 y las
+15:48 del 27-jul— es concluyente:
+
+```bash
+sudo docker exec nexora_nginx grep -nE 'location \^~ /stream/|auth_request ' \
+  /etc/nginx/snippets/stream-gate.conf.bak-20260727-1500
+```
+
+```
+ 44:location ^~ /stream/ec-main/ {
+ 48:    auth_request /__stream_auth;
+ 67:location ^~ /stream/co-main/ {
+ 70:    auth_request /__stream_auth;
+100:location ^~ /stream/tc-main/ {
+103:    auth_request /__stream_auth;
+                      ← no hay tc-mia
+```
+
+**Tres nodos con gate, `tc-mia` ausente.** Es **exactamente** el diferencial observado
+(3 × 401 + 1 × 200), en el fichero que producción estaba sirviendo.
+
+Corrobora la datación el propio proceso: contenedor arrancado el `2026-07-27T12:57:33Z`, pero
+los *workers* son ~3 h **más jóvenes** que el master → hubo un `reload` hacia las 15:5x, justo
+después del `mtime` 15:48:45 del snippet. Esa recarga es la que aplicó el arreglo.
+
+**Ventana de fallo acotada: 2026-07-27 ~03:17 → ~15:48 UTC (~12.5 h).**
+
+### 8.4 Qué se deriva
+
+1. **No fue un bypass.** La petición a `/stream/tc-mia/…` **nunca llegó al gate**: no había
+   `location` que la capturase. Cayó en el catch-all `location /` de
+   `snippets/app-locations.conf:25` → `proxy_pass http://nexora_web_player:80` →
+   `try_files … /index.html` → **200 con HTML**.
+2. **No hubo exposición de vídeo, y no hace falta el `curl` para afirmarlo.** Sin `location`
+   no hay `auth_request`, luego no hubo nada que «aprobar»; y el destino del catch-all es el
+   contenedor del web player, que **no sirve segmentos ni manifiestos**. La petición jamás se
+   dirigió a la torre de Miami. Un 200 desde el SPA no puede contener vídeo. **H2 (grant vivo
+   en Redis) queda descartada**: el gate ni siquiera corrió.
+3. **Impacto real: disponibilidad.** Durante esas ~12.5 h los canales de la torre de Miami
+   **no se veían en ninguna de las dos marcas**, devolviendo el HTML del SPA en vez del
+   manifiesto.
+4. **Corrección del «qué vhost»: la anotación imprecisa era la de §3, no la del registro.**
+   §3 exigía que la prueba fuese contra la marca nueva, porque modeló el despliegue sobre el
+   monolito y los scripts `patch_nginx_*.py` (que insertan el bloque **en un solo** `server{}`).
+   Eso **no es lo desplegado**. Lo desplegado es **un snippet compartido**: al faltarle
+   `tc-mia`, el fallo afectaba a **las dos marcas por igual**. Por tanto **el registro original
+   («la prueba fue contra `nexoraplay.net`») es correcto y consistente**, y §3 «A favor 6»
+   —que explicaba el conflicto como una diferencia *entre vhosts*— es **incorrecto**: la
+   diferencia era **temporal**, no por dominio.
+5. **Se reconcilia el 401 de `676d68e` (26-jul 22:55) sin descartarlo.** A esa hora aún no
+   estaba desplegado el layout factorizado (llegó el 27-jul 03:17); regía la config anterior,
+   que sí gateaba `tc-mia`. Secuencia: **401 (26-jul) → 200 (27-jul 03:17–15:48) → 401
+   (desde 15:48)**. Ninguna medida del histórico era falsa.
+6. **Causa raíz organizativa: se desplegó una copia rancia.** `c1f76e1` añadió `tc-mia` al
+   snippet **en el repo a las 02:11**; el despliegue de las **03:17** —una hora *después*—
+   subió un snippet **sin** `tc-mia`. Es el riesgo de «producción no es git» en estado puro:
+   un arreglo que ya existía en el repo fue **pisado** por una copia manual anterior.
+   El fallo no fue de diseño del gate, sino **del procedimiento de copia**.
+
+### 8.5 Qué queda pendiente — decide el dueño, NO se ha aplicado nada
+
+**El agujero de clase sigue abierto.** Verificado en esta misma lectura: **ni el repo ni la
+config viva** tienen el cinturón de §5.1 (`grep -rnE 'location \^~ /stream/ \{' deploy/nginx/`
+→ 0 resultados). Hoy no hay ningún nodo sin declarar, así que no hay síntoma; pero **el
+próximo nodo que se dé de alta y se olvide vuelve a producir un 200 mudo** en vez de un 401.
+La reparación del 27-jul arregló *el caso*, no *la clase*.
+
+**Arreglo concreto propuesto (§5.1) — NO aplicado.** Añadir al final de
+`deploy/nginx/snippets/stream-gate.conf`, y desplegarlo con el procedimiento habitual:
+
+```nginx
+# Cinturón: un /stream/<nodo> no declarado NO puede caer en el catch-all del SPA
+# (snippets/app-locations.conf: location / -> web_player -> try_files … /index.html),
+# que responde 200 con HTML y disfraza un `location` ausente de "gate abierto".
+# Prefijo MÁS CORTO que los de cada nodo, así que solo actúa cuando ninguno coincide.
+location ^~ /stream/ {
+    access_log /dev/stdout stream_safe;
+    default_type application/json;
+    return 401 '{"success":false,"error":"playback token required or invalid"}';
+}
+```
+
+Riesgo del cambio: **nulo para las rutas vivas** — nginx elige siempre el prefijo más largo,
+y `^~ /stream/` es más corto que `^~ /stream/tc-mia/`. Devuelve 401 (no 404) a propósito, para
+no permitir enumerar qué nodos existen.
+
+**Además, y por orden de valor:**
+
+| # | Acción | Por qué | Urgencia |
+|---|---|---|---|
+| 1 | Aplicar §5.1 (cinturón) | Cierra la clase entera de fallo, no solo este caso | Alta |
+| 2 | Arreglar el **procedimiento de despliegue** (causa raíz, §8.4.6) | Un `git`-diff o checksum repo↔vivo antes de copiar habría evitado las 12.5 h | Alta |
+| 3 | Retirar `deploy/nginx/nexoraplay.conf` (939 líneas) y los `patch_nginx_*.py` (§5.2) | Material muerto que ya indujo un diagnóstico equivocado | Media |
+| 4 | Borrar `stream-gate.conf.bak-20260727-1500` del contenedor | Hoy **no se carga** (los `include` son por nombre exacto, no glob), pero es un fichero de config obsoleto en `/etc/nginx/snippets/` | Baja |
+| 5 | §5.3–§5.6 (backend) | Huecos reales, **independientes** de este veredicto y **siguen abiertos** | Media |
+
+Nada de lo anterior se ha ejecutado: la autorización de esta sesión era **de solo lectura**.
+
+### 8.6 Lo que esta sonda **no** puede afirmar
+
+- **No se verificó el `Content-Type` del 200 original.** La sonda B quedó fuera de la
+  autorización y, además, **ya no es reproducible**: la ventana se cerró el 27-jul a las 15:48.
+  La conclusión «era HTML del SPA» es **deductiva** (se sigue de la config vigente en la
+  ventana + el destino del catch-all), no una medida directa. Es sólida, pero conviene
+  registrarla como lo que es.
+- **El `mtime` data la copia, no necesariamente la edición.** La ventana 03:17→15:48 se apoya
+  en `mtime` + edad de los *workers*; ambos coinciden, pero ninguno es un log de auditoría.
+- **No se revisó `access_log` de la ventana** para contar cuántas peticiones reales cayeron en
+  el SPA. Sería la única vía de cuantificar el impacto de disponibilidad, y es lectura pura:
+  queda como sonda opcional si el dueño quiere la cifra.
