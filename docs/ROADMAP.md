@@ -201,7 +201,17 @@ enumeración por *timing* (~50–100 ms: `if not user or not verify_password(...
 **Decisión de negocio (2026-07-31):** La Red **no** vende hoy servicios add-on por cliente
 (VOD/Timeshift/VIP); se contemplan a futuro. No se construye el modelo ni la migración. El
 entitlement se resuelve por plan, así que añadir una capa por-cliente después es aditivo.
-**Sin decidir:** ¿límite de dispositivos por cliente además de por plan? (implica migración de BD).
+
+**Decisión de negocio (2026-07-31): el límite de dispositivos queda POR PLAN — 5 en el plan
+estándar, 10 en VIP.** No hay override por cliente, así que **no hace falta migración**:
+`plans.max_devices` ya existe (`app/models/plan.py:19`) y es un cambio de datos, no de esquema.
+Se aplica desde el panel de administración una vez desplegado, o con un UPDATE.
+
+⚠️ **`max_devices` y `max_connections` no son lo mismo** y hoy divergen (el plan de pruebas
+local tiene 3 conexiones y 10 dispositivos). `max_devices` son los aparatos que un suscriptor
+puede tener registrados; `max_connections` son los streams simultáneos que puede abrir. Fijar
+5/10 dispositivos **no** dice cuántos pueden reproducir a la vez — eso sigue **sin decidir** y
+es lo que realmente carga los nodos.
 
 **`NX-APPS` (Android TV / Mobile / iOS) está BLOQUEADO** por restricción del proyecto: no se
 empieza hasta que **playback, sesiones y observabilidad** estén estables (⇒ P0 + P1 + P2.1 cerrados).

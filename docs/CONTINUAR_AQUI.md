@@ -62,7 +62,14 @@ Script listo en `deploy/RUNBOOK_EDGE_MULTIDOMINIO.md`.
 ## Decisiones de negocio
 - ~~¿La Red vende servicios add-on (VOD/Timeshift) por cliente?~~ → **decidido 2026-07-31: no se
   venden hoy, se contemplan a futuro.** No construir el modelo ni la migración; queda en P4.
-- **Pendiente:** ¿límite de dispositivos por cliente, además de por plan? → migración de BD.
+- ~~¿Límite de dispositivos por cliente, además de por plan?~~ → **decidido 2026-07-31: queda por
+  plan. 5 dispositivos en el estándar, 10 en VIP.** Sin override por cliente, así que **no hace
+  falta migración**: `plans.max_devices` ya existe. Es un cambio de datos, aplicable desde el
+  panel de administración cuando se despliegue, o con un UPDATE sobre `plans`.
+- **Pendiente y distinto:** `max_connections` (streams simultáneos) no se ha decidido. No es lo
+  mismo que `max_devices` y hoy divergen — el plan de pruebas local tiene 3 conexiones y 10
+  dispositivos. Los dispositivos son los aparatos registrados; las conexiones, lo que se puede
+  reproducir a la vez, que es lo que carga los nodos y lo que factura ancho de banda.
 
 ---
 
