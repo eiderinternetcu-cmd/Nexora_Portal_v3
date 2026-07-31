@@ -2,7 +2,13 @@ version: "3.9"
 
 services:
   api:
-    build: .
+    build:
+      context: .
+      # dev-only stage (adds pytest/pytest-asyncio via requirements-dev.txt).
+      # docker-compose.production.yml does not set `target`, so it falls back
+      # to the Dockerfile's last stage (`runtime`, no dev deps) and never
+      # picks this one up.
+      target: dev
     container_name: nexora_api
     ports:
       - "8000:8000"
@@ -12,6 +18,10 @@ services:
       - POSTGRES_PORT=5432
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      # Local/dev-only: lets `docker exec nexora_api python -m pytest tests/`
+      # work out of the box. nexora_test is a dedicated DB, never the app one.
+      - TEST_DATABASE_URL=postgresql+psycopg://${POSTGRES_USER:-nexora}:${POSTGRES_PASSWORD:-nexora_secret}@postgres:5432/nexora_test
+      - TEST_REDIS_URL=redis://redis:6379/15
     depends_on:
       postgres:
         condition: service_healthy
@@ -22,6 +32,9 @@ services:
       - ./migrations:/app/migrations
       - ./scripts:/app/scripts
       - ./alembic.ini:/app/alembic.ini
+      # Dev-only: without this, pytest inside the container runs the copy
+      # baked into the image at build time, not the files being edited.
+      - ./tests:/app/tests
     networks:
       - nexora_net
     restart: unless-stopped

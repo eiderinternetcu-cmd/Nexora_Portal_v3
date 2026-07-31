@@ -67,6 +67,33 @@ docker exec nexora_api python -m alembic upgrade head
 docker exec nexora_api python scripts/import_m3u_channels.py
 docker logs -f nexora_api
 
+# Tests dentro del contenedor (P1.5 — este es el comando correcto, no lo
+# hagas contra el venv del host salvo que sepas por que).
+#
+# `docker exec nexora_api python -m pytest tests/` SOLO valida algo desde que
+# docker-compose.yml (dev) monta ./tests dentro del contenedor y construye la
+# imagen con `target: dev` (Dockerfile), que instala requirements-dev.txt
+# encima de la imagen base. Antes de ese cambio pasaban dos cosas en
+# silencio: (1) ./tests no estaba montado, asi que pytest corria la copia
+# horneada en el build, no lo que tenias editado; (2) pytest ni siquiera
+# estaba instalado en la imagen. Un "0 tests run" o un verde que no reflejaba
+# tus cambios pasaba desapercibido. `docker-compose.production.yml` NO monta
+# ./tests ni pasa `target: dev`, asi que la imagen de produccion se queda tal
+# cual (sin pytest, sin la carpeta de tests).
+#
+# Si tocas Dockerfile o requirements-dev.txt, reconstruye antes de correr:
+docker compose build api
+docker exec nexora_api python -m pytest tests/ -q
+
+# Un solo fichero:
+docker exec nexora_api python -m pytest tests/test_alerts.py -q
+
+# Dentro del contenedor los hosts son postgres:5432 y redis:6379 (no
+# localhost:5433 / localhost:6380, que es como se ven desde el host).
+# docker-compose.yml ya exporta TEST_DATABASE_URL y TEST_REDIS_URL apuntando
+# a la base nexora_test para que esto funcione sin configuracion adicional.
+# conftest.py lee TEST_DATABASE_URL / TEST_REDIS_URL — OJO, no POSTGRES_DB.
+
 # Login admin / suscriptor de prueba
 curl -X POST http://localhost:8000/api/v1/auth/login \
   -H "Content-Type: application/json" -d '{"username":"admin","password":"Admin1234!"}'
