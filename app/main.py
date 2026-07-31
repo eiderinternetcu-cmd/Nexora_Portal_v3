@@ -69,7 +69,9 @@ async def _stream_health_monitor() -> None:
             redis = await get_redis()
             alerts = AlertService(redis)
             for n in await check_all_nodes():
-                detail = None if n["reachable"] else f"host={n['host']} configured={n['configured']}"
+                detail = None if n["reachable"] else (
+                    n.get("detail") or f"host={n['host']} configured={n['configured']}"
+                )
                 await alerts.record_node_health(n["node_id"], n["reachable"], detail)
         except Exception as exc:
             print(f"[nexora-api] Stream health monitor error: {exc}")

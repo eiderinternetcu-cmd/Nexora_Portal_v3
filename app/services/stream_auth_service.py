@@ -171,6 +171,7 @@ class StreamAuthService:
         stream_key: str | None = None,
         node: str | None = None,
         client_ip: str | None = None,
+        probe: bool = False,
     ) -> tuple[str, str, int]:
         """Returns (encoded_token, playback_jti, ttl_seconds).
 
@@ -178,6 +179,10 @@ class StreamAuthService:
         Bound to subscriber(sub) + device(dev) + session(ses) + channel(chn) +
         stream_key(sk) + node + client-IP hash(cip), so a token is only valid for
         its exact stream and (under IP binding) its issuing client.
+
+        probe=True adds the 'pb' claim, which marks a health-probe token: the gate
+        honors it as a normal token but seeds NO segment grant for it. The claim is
+        only ADDED when set, so tokens issued to real clients are unchanged.
         """
         jti = str(uuid.uuid4())
         ttl = settings.playback_token_expire_seconds
@@ -197,6 +202,8 @@ class StreamAuthService:
             "iat": int(now.timestamp()),
             "exp": int((now + timedelta(seconds=ttl)).timestamp()),
         }
+        if probe:
+            payload["pb"] = True
         token = jwt.encode(payload, settings.secret_key, algorithm=settings.jwt_algorithm)
         return token, jti, ttl
 
@@ -218,9 +225,12 @@ class StreamAuthService:
         })
         await self.redis.setex(key_playback(jti), ttl, data)
 
-        # Track under session for bulk revocation (TTL = IPTV session duration)
-        await self.redis.sadd(key_session_playbacks(session_jti), jti)
-        await self.redis.expire(key_session_playbacks(session_jti), _IPTV_SESSION_TTL)
+        # Track under session for bulk revocation (TTL = IPTV session duration).
+        # Sessionless tokens (the health probe) would otherwise create an orphan
+        # set under the empty key that nothing ever revokes.
+        if session_jti:
+            await self.redis.sadd(key_session_playbacks(session_jti), jti)
+            await self.redis.expire(key_session_playbacks(session_jti), _IPTV_SESSION_TTL)
 
     async def _decode_jwt(self, token: str) -> dict:
         """Decode and verify JWT. Raises NexoraException on failure.
@@ -447,6 +457,8 @@ class StreamAuthService:
             "stream_key": payload.get("sk"),
             "node": payload.get("node"),
             "expires_at": payload.get("exp"),
+            # Health-probe token → the caller must NOT seed a segment grant.
+            "probe": bool(payload.get("pb")),
         }
 
     # ── Segment grant cache (C-PROD-1) ─────────────────────────────────────────
@@ -559,6 +571,53 @@ class StreamAuthService:
         return self._build_result(
             token, jti, session.access_token_jti, ttl, subscriber_id, device.id, channel_id
         )
+
+    # ── Health probe token (P0.5) ─────────────────────────────────────────────
+
+    # Synthetic identity used ONLY by the node health probe. Fixed, reserved
+    # UUIDs so the probe never collides with a real subscriber/device and its
+    # whole Redis footprint is one recognizable ZSET plus one playback key.
+    PROBE_SUBSCRIBER_ID = uuid.UUID("00000000-0000-0000-0000-00000000b10b")
+    PROBE_DEVICE_ID = uuid.UUID("00000000-0000-0000-0000-00000000de71")
+
+    async def mint_probe_token(self, node: str, stream_key: str) -> tuple[str, str]:
+        """Mint a short-lived playback token for the node health probe.
+
+        Deliberately goes through the SAME issuing path as authorize()
+        (_issue_jwt + _store_jwt), so what the probe exercises at the edge is the
+        real /stream/* gate, not a look-alike that could drift away from it.
+
+        The identity is synthetic — no subscriber row, no device row, no DB
+        access. The token carries an empty 'ses' claim (the gate skips the
+        session check when 'ses' is falsy) and no 'cip' (IP binding skipped), and
+        a ZSET slot is opened for the synthetic pair so the connection check
+        passes. Everything else — signature, aud/iss, exp, sk/node binding — is
+        validated for real.
+
+        The 'pb' claim makes the gate skip grant_stream_access, so a probe leaves
+        NO segment grant behind. That has to be prevented rather than cleaned up
+        afterwards: the grant is keyed by hash_ip(X-Real-IP), i.e. the api
+        container's address AS NGINX SEES IT, which this process never learns and
+        so cannot target for deletion. The only key shape we could aim at
+        (node+stream+*) would delete the grants of real viewers of that stream.
+
+        Returns (token, jti). The caller MUST call release_probe_token(jti).
+        """
+        await self._conn.open_connection(self.PROBE_SUBSCRIBER_ID, self.PROBE_DEVICE_ID, 1)
+        token, jti, ttl = self._issue_jwt(
+            self.PROBE_SUBSCRIBER_ID, self.PROBE_DEVICE_ID, "",
+            stream_key=stream_key, node=node, probe=True,
+        )
+        await self._store_jwt(
+            jti, self.PROBE_SUBSCRIBER_ID, self.PROBE_DEVICE_ID, "", stream_key, ttl
+        )
+        return token, jti
+
+    async def release_probe_token(self, jti: str) -> None:
+        """Drop the probe's playback key and ZSET slot as soon as the probe ends,
+        so a probe token is never reusable beyond the request it was minted for."""
+        await self.redis.delete(key_playback(jti))
+        await self._conn.close_connection(self.PROBE_SUBSCRIBER_ID, self.PROBE_DEVICE_ID)
 
     async def revoke_token(self, token: str) -> bool:
         """

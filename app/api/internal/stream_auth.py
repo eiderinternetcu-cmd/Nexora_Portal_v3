@@ -108,7 +108,12 @@ async def validate_stream(
             raise
         g_node = out.get("node") or node
         g_key = out.get("stream_key") or stream_key
-        if g_node and g_key:
+        # A health-probe token (claim 'pb') is authorized like any other, but it
+        # must leave NO trace: seeding a grant here would open tokenless segment
+        # access for the backend's own IP on every monitoring cycle — the very
+        # revocation-latency hole STREAM_GRANT_MAX_LIFETIME_SECONDS exists to
+        # bound. The probe only ever fetches the manifest, so it needs no grant.
+        if g_node and g_key and not out.get("probe"):
             await svc.grant_stream_access(g_node, g_key, hash_ip(client_ip), out.get("session_id"))
         return {"ok": True, "channel_id": out.get("channel_id")}
 

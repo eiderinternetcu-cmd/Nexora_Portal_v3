@@ -47,6 +47,10 @@ class NodeHealth(BaseModel):
     reachable: bool
     latency_ms: float | None
     stream_count: int | None
+    # P0.5: which probe strategy produced this reading, and — when it failed —
+    # why, so "node down" in the admin panel names its cause instead of hiding it.
+    probe_mode: str = "origin"
+    detail: str | None = None
 
 
 @router.get("/metrics", response_model=SystemMetrics)
