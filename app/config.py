@@ -1,3 +1,4 @@
+import ipaddress
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
 
@@ -117,6 +118,70 @@ class Settings(BaseSettings):
     stream_grant_max_lifetime_seconds: int = 0   # 0 = unbounded (legacy); >0 = absolute cap from first seed
     stream_grant_token_fallback: bool = True     # token present-but-expired falls back to a valid grant (continuity)
 
+    # ── Playback node binding (NX-NODE) ──────────────────────────────────────
+    # The /stream/* gate binds a playback token to its stream_key AND to its
+    # Flussonic node, but the two checks were never symmetric:
+    #
+    #     sk   → `payload.get("sk") != stream_key`            → fails CLOSED
+    #     node → `payload.get("node") not in (None, node)`    → fails OPEN
+    #
+    # A token WITHOUT a 'node' claim was therefore valid on EVERY node, while a
+    # token without 'sk' was refused. The tolerance was load-bearing when it was
+    # written: the STB surface resolved neither claim (see app/api/stb/playback.py
+    # `_resolve_channel`) and `create_token` left node optional "so legacy callers
+    # keep their current token shape". Both emitters were fixed earlier on this
+    # branch, and every remaining issuing path (client /authorize, client reissue,
+    # STB /play, STB /token, the health probe) sets 'sk' and 'node' together or
+    # neither — so a node-less token is also sk-less and is ALREADY refused one
+    # line earlier by the stream_key check. Closing the asymmetry is expected to
+    # be a no-op; the flag exists because "expected" is not "observed", and
+    # playback tokens live 60s, so a rollback takes effect within a minute.
+    #
+    # False (default) = today byte for byte: a token with no 'node' claim passes
+    # on any node. True = node is checked exactly like stream_key.
+    playback_node_binding_enforce: bool = False
+
+    # Node allowlist for the /stream/* gate. The node is a PATH SEGMENT of the
+    # incoming URL (/stream/<node>/<stream_key>/…), i.e. attacker-controlled, and
+    # nothing in app/ ever validated it — an unknown node was carried straight
+    # into token evaluation and into the Redis grant keyspace
+    # (nexora:stream_grant:{node}:…). Listing the real nodes here rejects an
+    # unknown one BEFORE any token is decoded.
+    # Comma-separated node ids, matched exactly (they are lowercase slugs, e.g.
+    # "ec-main,co-main,ec-quito"). Empty (default) = OFF, no validation, today's
+    # behavior.
+    playback_node_allowlist: str = ""
+
+    # ── Client IP resolution (NX-AUTH) ───────────────────────────────────────
+    # Everything keyed by "client IP" (login lockout, per-IP rate limiting, audit
+    # rows, playback IP binding) used to read the FIRST value of X-Forwarded-For,
+    # a header the client fully controls. That makes the per-IP brake both
+    # EVADABLE (send a fresh fake IP per attempt and no bucket ever fills) and
+    # ABUSABLE (send a victim's address and lock THEM out of the admin panel for
+    # LOGIN_LOCKOUT_MINUTES). A multi-hop X-Forwarded-For must also be read from
+    # the RIGHT, not the left: the leftmost hop is whatever the client typed, the
+    # rightmost is the one the closest trusted proxy appended.
+    #
+    #   legacy (default) → the historical behavior, unchanged.
+    #   edge             → forwarded headers are honored ONLY when the TCP peer is
+    #                      listed in TRUSTED_PROXY_CIDRS: X-Real-IP first (the
+    #                      edge overwrites it with $remote_addr), then the LAST
+    #                      hop of X-Forwarded-For, then the peer itself. From an
+    #                      untrusted peer the headers are ignored entirely and the
+    #                      peer address is used, so spoofing buys nothing.
+    #
+    # With no proxy in front (local development) the peer is not trusted, no
+    # forwarded header is honored and the peer address is used — the environment
+    # keeps working, it just stops believing headers.
+    client_ip_source: str = "legacy"     # legacy | edge
+
+    # Comma-separated IPs or CIDRs of the proxies allowed to assert a client IP.
+    # In Docker this is the compose network the nginx container sits on (e.g.
+    # "172.18.0.0/16"); behind a CDN add the provider's published ranges. Empty
+    # (default) = no peer is trusted, which in `edge` mode means forwarded
+    # headers are never honored.
+    trusted_proxy_cidrs: str = ""
+
     # Client (subscriber) tokens — longer-lived for mobile/TV apps
     client_access_token_expire_hours: int = 24
     client_refresh_token_expire_days: int = 90
@@ -201,6 +266,35 @@ class Settings(BaseSettings):
             node, stream = node.strip(), stream.strip()
             if node and stream:
                 out.setdefault(node, stream)
+        return out
+
+    @property
+    def playback_allowed_nodes(self) -> set[str]:
+        """PLAYBACK_NODE_ALLOWLIST as a set of node ids.
+
+        Same CSV discipline as PLAYBACK_HOST_ALLOWLIST: parsed here, never
+        derived from request data. Empty set = feature off.
+        """
+        return {raw.strip() for raw in self.playback_node_allowlist.split(",") if raw.strip()}
+
+    @property
+    def trusted_proxy_networks(self) -> list[ipaddress.IPv4Network | ipaddress.IPv6Network]:
+        """TRUSTED_PROXY_CIDRS as networks. A bare address becomes a /32 (/128).
+
+        Unparseable entries are dropped rather than raised: a typo in this
+        variable must not take the API down at import time, and dropping an entry
+        fails SAFE (that proxy simply stops being trusted, so its forwarded
+        headers are ignored and the peer address is used instead).
+        """
+        out: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
+        for raw in self.trusted_proxy_cidrs.split(","):
+            entry = raw.strip()
+            if not entry:
+                continue
+            try:
+                out.append(ipaddress.ip_network(entry, strict=False))
+            except ValueError:
+                continue
         return out
 
     @property
