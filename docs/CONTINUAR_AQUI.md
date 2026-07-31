@@ -66,10 +66,16 @@ Script listo en `deploy/RUNBOOK_EDGE_MULTIDOMINIO.md`.
   plan. 5 dispositivos en el estándar, 10 en VIP.** Sin override por cliente, así que **no hace
   falta migración**: `plans.max_devices` ya existe. Es un cambio de datos, aplicable desde el
   panel de administración cuando se despliegue, o con un UPDATE sobre `plans`.
-- **Pendiente y distinto:** `max_connections` (streams simultáneos) no se ha decidido. No es lo
-  mismo que `max_devices` y hoy divergen — el plan de pruebas local tiene 3 conexiones y 10
-  dispositivos. Los dispositivos son los aparatos registrados; las conexiones, lo que se puede
-  reproducir a la vez, que es lo que carga los nodos y lo que factura ancho de banda.
+- ~~¿Cuántas conexiones simultáneas por plan?~~ → **decidido 2026-07-31: 2 en el estándar, 4 en
+  VIP** (ratio 2,5:1 sobre los dispositivos, que vale de regla para los planes futuros). Tampoco
+  necesita migración: `plans.max_connections` ya existe. No igualar conexiones y dispositivos:
+  los dispositivos son comodidad, las conexiones son la palanca antifraude — igualarlas hace el
+  plan divisible entre cinco hogares con un solo pago.
+
+⚠️ **El límite por plan no protege del techo de escala.** El edge hace `proxy_pass` de cada
+segmento **sin caché**, así que la cabecera —ya al 74 % de CPU— escala con el número de
+espectadores y no de canales. Cincuenta clientes viendo el mismo partido, con una conexión cada
+uno, la saturan igual. → **P1.6 del roadmap**, por encima del resto de P1.
 
 ---
 

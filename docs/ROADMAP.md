@@ -131,6 +131,37 @@ no el código editado — un falso verde esperando a ocurrir, y el comando que l
 recomendaba. Mientras tanto, la vía correcta es el venv del host contra los puertos publicados
 (`localhost:5433` / `localhost:6380`) con `TEST_DATABASE_URL` y `TEST_REDIS_URL` puestas.
 
+### P1.6 · Caché de segmentos en el edge — **el techo de escala real**
+Hoy la cabecera escala con el número de **espectadores**, no de canales, y eso la mata antes que
+cualquier otra cosa.
+
+Cuatro hechos verificados que lo componen:
+1. **El edge no es un redirector, es un relé.** `deploy/nginx/nexoraplay.conf:407` hace
+   `proxy_pass` de cada segmento al origen. La regla arquitectónica "Nexora NO hace proxy de
+   vídeo — el cliente reproduce directo del edge" **dejó de ser cierta** cuando `/stream/*` pasó
+   a ser same-origin. Cada espectador consume ancho de 45.184.225.4 dos veces (entra del origen,
+   sale al cliente).
+2. **No hay caché**: cero `proxy_cache` en la config, `proxy_buffering off`. Diez espectadores
+   del mismo canal son diez tiradas independientes contra la cabecera.
+3. **La cabecera ya está justa**: 74 % de CPU y 191,9 Mbps de salida (revisión del 2026-07-27),
+   con la nota de que a partir de ahí el cuello de botella deja de ser el transcodificado.
+4. **~3 Mbps por conexión** de media (SD transcodificado 1500 kbps / maxrate 1700; el 720p a
+   2500/2800; fuentes sin transcodificar 2–4 Mbps).
+
+La cuenta que importa no es la de hoy (5 suscriptores) sino la de después: **100 suscriptores,
+30 % de concurrencia en punta, 1,5 flujos de media ≈ 45 conexiones simultáneas ≈ 135 Mbps
+adicionales** sobre los 191,9 que la cabecera ya sirve.
+
+⚠️ **El límite por plan NO protege de esto.** Cincuenta clientes viendo el mismo partido con una
+sola conexión cada uno producen el mismo problema. Lo que lo resuelve es cachear: los `.ts` de
+HLS son inmutables, así que N espectadores de un canal colapsan en **una** tirada al origen —
+la diferencia entre escalar con el número de canales o con el de espectadores.
+
+`proxy_cache` **no salta el gate**: el `auth_request` se ejecuta en cada petición igual; lo que
+se cachea es la respuesta del upstream, no la autorización. No se pierde control de acceso.
+**AC:** N espectadores concurrentes del mismo canal → 1 sola conexión al origen; un token
+inválido sigue dando 401 con el segmento en caché.
+
 ### P1.1 · Stress tests de playback (Fase 4 · Bloque 3 — nunca ejecutado)
 Con métricas encendidas (`/api/admin/metrics`, `/api/admin/sessions/live`):
 - Zapping rápido (5 canales en 30 s) → sesiones zombie y falsos 409.
@@ -207,11 +238,15 @@ estándar, 10 en VIP.** No hay override por cliente, así que **no hace falta mi
 `plans.max_devices` ya existe (`app/models/plan.py:19`) y es un cambio de datos, no de esquema.
 Se aplica desde el panel de administración una vez desplegado, o con un UPDATE.
 
-⚠️ **`max_devices` y `max_connections` no son lo mismo** y hoy divergen (el plan de pruebas
-local tiene 3 conexiones y 10 dispositivos). `max_devices` son los aparatos que un suscriptor
-puede tener registrados; `max_connections` son los streams simultáneos que puede abrir. Fijar
-5/10 dispositivos **no** dice cuántos pueden reproducir a la vez — eso sigue **sin decidir** y
-es lo que realmente carga los nodos.
+**Decisión de negocio (2026-07-31): conexiones simultáneas — 2 en el estándar, 4 en VIP.**
+Ratio **2,5:1** respecto a los dispositivos, que sirve de regla para los planes futuros.
+
+`max_devices` y `max_connections` son palancas distintas y no deben igualarse. Los dispositivos
+son **comodidad** (registrar la tele, el móvil, la tablet); las conexiones son la **palanca
+comercial**: si se igualan, el plan se vuelve divisible entre cinco hogares con un solo pago, y
+esa reventa no necesita que nadie la organice — sale sola. El 2 tiene además valor diagnóstico:
+muchos 409 de límite alcanzado en cuentas estándar señalan una cuenta compartida, señal que con
+3 o más se pierde en el ruido.
 
 **`NX-APPS` (Android TV / Mobile / iOS) está BLOQUEADO** por restricción del proyecto: no se
 empieza hasta que **playback, sesiones y observabilidad** estén estables (⇒ P0 + P1 + P2.1 cerrados).
@@ -230,6 +265,8 @@ P0.6 desplegar la rama (+ Alembic 008)   ← lo más valioso parado hoy
 P0.7 sonda tc-mia (5 min, solo lectura)  ← barato, hazlo ya
 P0.8 decidir la fuga de source_url       ← barato, es una decisión
 
+P1.6 cache de segmentos                  ← antes de crecer en clientes, no despues
+
 P1.4 paridad migración↔ORM ──┐
 P1.5 tests en el contenedor ─┴──► P1.1 stress + P1.3 staging
                                         └──► P2b seguridad (NX-NODE, NX-AUTH, NX-DEV)
@@ -246,6 +283,7 @@ P1.5 tests en el contenedor ─┴──► P1.1 stress + P1.3 staging
 |---|---|
 | `plan_channels` da 500 en prod al desplegar | **Resuelto en la rama** (Alembic 008); el riesgo se cierra al aplicarla junto con P0.6 |
 | Divergencia ORM↔migraciones invisible para los tests | **Abierto** → P1.4. Ya produjo un bug bloqueante |
+| La cabecera escala con espectadores, no con canales (sin caché de segmentos) | **Abierto** → P1.6. Hoy no duele con 5 suscriptores; el día que duela, ya es tarde |
 | Revocación no corta streams en curso (grant auto-renovable) | Código listo; **falta definir el tope** → P0.2 |
 | `strict` IP-binding rompe clientes móviles | Mitigado: escalonar `off → soft → strict` con observación (P0.1) |
 | Canales de Miami invisibles en una marca | **Probable** → P0.7 lo confirma con una sonda |
