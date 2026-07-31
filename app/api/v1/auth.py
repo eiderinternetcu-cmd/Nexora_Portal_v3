@@ -20,10 +20,17 @@ async def login(
     db: AsyncSession = Depends(get_db),
     redis: aioredis.Redis = Depends(get_redis),
 ):
-    """Login con username/password. Devuelve access + refresh token."""
+    """Login con username/password. Devuelve access + refresh token.
+
+    Todo intento —éxito o fallo— queda en `audit_log` (NX-AUTH). Nunca se
+    registra la contraseña ni los tokens emitidos.
+    """
     ip = get_client_ip(request)
     service = AuthService(db, redis)
-    return await service.login(body.username, body.password, ip)
+    return await service.login(
+        body.username, body.password, ip,
+        user_agent=request.headers.get("User-Agent"),
+    )
 
 
 @router.post("/refresh", response_model=TokenResponse)
