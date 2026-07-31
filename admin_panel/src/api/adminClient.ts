@@ -7,6 +7,7 @@ import type {
   AuditEntry,
   AuditQuery,
   Channel,
+  ChannelSecrets,
   Device,
   DeviceBlockRequest,
   FlussonicHealthOut,
@@ -456,12 +457,29 @@ export class AdminClient {
   // Canales  (respuesta sin envoltura)
   // -------------------------------------------------------------------------
 
+  /** Listado con stream_key/source_url ENMASCARADOS (ver el tipo `Channel`). */
   listChannels() {
     return this.get<Channel[]>("/channels");
   }
 
+  /** Detalle: enmascarado igual que el listado. */
   getChannel(channelId: string) {
     return this.get<Channel>(`/channels/${encodeURIComponent(channelId)}`);
+  }
+
+  /**
+   * GET /channels/{id}/secrets — los valores REALES de un canal.
+   *
+   * Solo admin: un reseller recibe 403 (no 404, el canal existe y esta en el
+   * listado que acaba de leer). Cada llamada escribe un evento
+   * `channel.secrets_reveal` en `audit_log` con quien, que canal y cuando.
+   *
+   * Llamar SOLO desde un click explicito del usuario. Si esto se cuela en la
+   * carga de una vista, el listado deja de estar enmascarado en la practica y
+   * ademas convierte el rastro de auditoria en ruido.
+   */
+  getChannelSecrets(channelId: string) {
+    return this.get<ChannelSecrets>(`/channels/${encodeURIComponent(channelId)}/secrets`);
   }
 
   getChannelStreamStatus(channelId: string) {

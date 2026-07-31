@@ -4,14 +4,23 @@ Allows admins to inspect what streams exist in Flussonic so they can
 update the local channel catalog (stream_key mappings) accordingly.
 
 SECURITY:
-  - Requires admin/reseller Bearer token.
+  - /health is admin/reseller. The stream routes are ADMIN ONLY (P0.8): a
+    Flussonic stream `name` IS the stream_key namespace, and `hls_url` is a
+    ready-made playable URL. Handing that to a reseller would reopen, in a
+    single listing, exactly the hole that masking stream_key in
+    /api/admin/channels closes — the whole catalog at once, and without even
+    needing the channel↔key mapping.
   - Flussonic credentials are never included in any response.
   - All operations are READ-ONLY. Write methods raise RuntimeError.
+
+Not audited, unlike /channels/{id}/secrets: the panel calls /streams on every
+load, so auditing it would bury the per-channel reveal events in noise and make
+the trail useless for the thing it exists for. The control here is the role.
 """
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from app.core.dependencies import require_admin_or_reseller
+from app.core.dependencies import require_admin, require_admin_or_reseller
 from app.models.user import User
 from app.integrations.flussonic_client import get_flussonic_client
 
@@ -62,10 +71,11 @@ async def flussonic_health(
 
 @router.get("/streams", response_model=list[FlussonicStreamItem])
 async def list_flussonic_streams(
-    user: User = Depends(require_admin_or_reseller),
+    user: User = Depends(require_admin),
 ):
     """
-    List all streams from Flussonic.
+    List all streams from Flussonic. ADMIN ONLY — `name` is a stream_key and
+    `hls_url` is a playable URL; a reseller gets 403.
     Use this to discover stream names and map them to local channel stream_key values.
     No Flussonic credentials in the response.
     503 if Flussonic is not configured.
@@ -96,9 +106,10 @@ async def list_flussonic_streams(
 @router.get("/streams/{stream_name}", response_model=FlussonicStreamItem)
 async def get_flussonic_stream(
     stream_name: str,
-    user: User = Depends(require_admin_or_reseller),
+    user: User = Depends(require_admin),
 ):
-    """Get info for a specific Flussonic stream by name."""
+    """Get info for a specific Flussonic stream by name. ADMIN ONLY — same
+    reason as /streams: the response carries a playable hls_url."""
     if not _flussonic.is_configured:
         raise HTTPException(status_code=503, detail="Flussonic not configured.")
 

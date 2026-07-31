@@ -369,7 +369,19 @@ export type DeviceBlockRequest = {
 // Canales  (app/schemas/channel.py)
 // ---------------------------------------------------------------------------
 
-/** `ChannelAdminOut` — vista completa; incluye stream_key (no exponer al cliente). */
+/**
+ * `ChannelAdminOut` — vista de listado Y de detalle.
+ *
+ * NO trae los secretos. `stream_key_masked` y `source_url_masked` son formas
+ * ENMASCARADAS y no reversibles (ver app/schemas/channel.py): conservan si el
+ * campo esta puesto, si la URL es relativa o absoluta, su esquema y si lleva
+ * credenciales incrustadas; el host y el path se tiran porque juntos son la URL
+ * que se salta el gate de entitlements.
+ *
+ * Los valores reales solo llegan por `getChannelSecrets()`, que es admin y queda
+ * auditado. El sufijo `_masked` es intencionado: si algo vuelve a leer
+ * `channel.stream_key` el compilador lo canta en vez de pintar "***".
+ */
 export type Channel = {
   id: string;
   channel_key: string;
@@ -377,9 +389,9 @@ export type Channel = {
   name: string;
   category: string | null;
   logo_url: string | null;
-  stream_key: string;
+  stream_key_masked: string;
   source_type: string;
-  source_url: string | null;
+  source_url_masked: string | null;
   epg_id: string | null;
   is_active: boolean;
   requires_subscription: boolean;
@@ -387,9 +399,21 @@ export type Channel = {
   updated_at: string;
 };
 
+/**
+ * `ChannelSecretsOut` — GET {prefix}/channels/{id}/secrets.
+ * Solo admin (un reseller recibe 403) y cada llamada queda en `audit_log`.
+ * Se pide SOLO tras una accion explicita del usuario, nunca al cargar la vista.
+ */
+export type ChannelSecrets = {
+  channel_id: string;
+  channel_key: string;
+  stream_key: string;
+  source_url: string | null;
+};
+
 /** `StreamStatusOut` — GET {prefix}/channels/{id}/stream-status */
 export type StreamStatus = {
-  stream_key: string;
+  channel_key: string;
   alive: boolean;
   client_count: number;
   input_alive: boolean;

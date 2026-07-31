@@ -4,11 +4,12 @@ import { AlertTriangle, Eye, EyeOff, Info, Radio, RefreshCw, Satellite } from "l
 import { ApiError, messageForError } from "../../api/errors";
 import type {
   Channel,
+  ChannelSecrets,
   FlussonicHealthOut,
   FlussonicStreamItem,
   StreamStatus,
 } from "../../api/types";
-import { useApi } from "../../auth/AuthContext";
+import { useApi, useAuth } from "../../auth/AuthContext";
 import {
   Button,
   DataTable,
@@ -25,20 +26,27 @@ import "./canales.css";
  * CANALES — pantalla CONSULTIVA.
  *
  * Endpoints (canales y flussonic vienen SIN envoltura .data):
- *   GET /api/admin/channels                     -> ChannelAdminOut[]
+ *   GET /api/admin/channels                     -> ChannelAdminOut[]  (enmascarado)
+ *   GET /api/admin/channels/{id}/secrets        -> ChannelSecretsOut   (admin, auditado)
  *   GET /api/admin/channels/{id}/stream-status  -> StreamStatusOut
  *   GET /api/admin/flussonic/health             -> FlussonicHealthOut
- *   GET /api/admin/flussonic/streams            -> FlussonicStreamItem[]
+ *   GET /api/admin/flussonic/streams            -> FlussonicStreamItem[]  (admin)
  *
  * SOLO LECTURA: la API admin no expone crear, editar ni borrar canales
  * (app/api/admin/channels.py solo declara GET). No se simula edicion.
  *
- * CAMPOS SENSIBLES:
- *   - `stream_key` va oculto tras un boton de revelar y nunca en el listado:
- *     con el host de Flussonic permite construir una URL de reproduccion
- *     saltandose el gate de entitlements.
- *   - `source_url` NO se pinta nunca: en fuentes de tipo pull suele llevar
- *     usuario y contrasena del origen embebidos. Solo se indica si esta puesta.
+ * CAMPOS SENSIBLES
+ * ----------------
+ * Antes esta vista se limitaba a NO PINTAR `stream_key` y `source_url`, pero la
+ * respuesta de red si los llevaba: cualquiera con acceso al panel los veia en
+ * devtools. Ya no: el listado y el detalle llegan enmascarados desde la API
+ * (`stream_key_masked`, `source_url_masked`).
+ *
+ * Los valores reales se piden a /secrets y SOLO al pulsar "Revelar":
+ *   - es admin (un reseller recibe 403),
+ *   - queda un evento `channel.secrets_reveal` en el log de auditoria.
+ * Por eso la llamada no puede colgarse de un efecto de carga: cada revelado es
+ * una accion deliberada de una persona, y asi es como se lee luego el rastro.
  */
 
 type Recurso<T> = {
@@ -91,6 +99,7 @@ function Aviso({
 
 export function CanalesView() {
   const api = useApi();
+  const { isAdmin } = useAuth();
 
   const [canales, setCanales] = useState<Channel[]>([]);
   const [cargandoCanales, setCargandoCanales] = useState(true);
@@ -103,7 +112,12 @@ export function CanalesView() {
   const [filtroEstado, setFiltroEstado] = useState<"todos" | "activos" | "inactivos">("todos");
 
   const [seleccionado, setSeleccionado] = useState<Channel | null>(null);
-  const [claveVisible, setClaveVisible] = useState(false);
+  /** Valores reales del canal abierto. Solo se rellena al pulsar "Revelar". */
+  const [secretos, setSecretos] = useState<Recurso<ChannelSecrets>>({
+    datos: null,
+    cargando: false,
+    error: null,
+  });
   const [estadoStream, setEstadoStream] = useState<Recurso<StreamStatus>>({
     datos: null,
     cargando: false,
@@ -137,11 +151,21 @@ export function CanalesView() {
 
   const cargarFlussonic = useCallback(async () => {
     setSalud((previo) => ({ ...previo, cargando: true }));
-    setStreams((previo) => ({ ...previo, cargando: true }));
+
+    // /flussonic/streams es admin: cada fila trae el nombre del stream (que es
+    // el stream_key) y una hls_url ya reproducible. Para un reseller ni se pide,
+    // porque un 403 esperado no es un error que mostrarle.
+    if (!isAdmin) {
+      setStreams({ datos: null, cargando: false, error: null });
+    } else {
+      setStreams((previo) => ({ ...previo, cargando: true }));
+    }
 
     const [resSalud, resStreams] = await Promise.allSettled([
       api.get<FlussonicHealthOut>("/flussonic/health"),
-      api.get<FlussonicStreamItem[]>("/flussonic/streams"),
+      isAdmin
+        ? api.get<FlussonicStreamItem[]>("/flussonic/streams")
+        : Promise.resolve(null),
     ]);
     if (!montado.current) return;
 
@@ -150,12 +174,18 @@ export function CanalesView() {
         ? { datos: resSalud.value, cargando: false, error: null }
         : { datos: null, cargando: false, error: mensajeFlussonic(resSalud.reason) },
     );
-    setStreams(
-      resStreams.status === "fulfilled"
-        ? { datos: resStreams.value, cargando: false, error: null }
-        : { datos: null, cargando: false, error: mensajeFlussonic(resStreams.reason) },
-    );
-  }, [api]);
+    if (isAdmin) {
+      setStreams(
+        resStreams.status === "fulfilled"
+          ? {
+              datos: (resStreams.value as FlussonicStreamItem[]) ?? [],
+              cargando: false,
+              error: null,
+            }
+          : { datos: null, cargando: false, error: mensajeFlussonic(resStreams.reason) },
+      );
+    }
+  }, [api, isAdmin]);
 
   useEffect(() => {
     void cargarCanales();
@@ -179,15 +209,38 @@ export function CanalesView() {
 
   const abrirDetalle = (canal: Channel) => {
     setSeleccionado(canal);
-    setClaveVisible(false);
+    // Abrir la ficha NO revela nada: no se llama a /secrets aqui a proposito.
+    setSecretos({ datos: null, cargando: false, error: null });
     setEstadoStream({ datos: null, cargando: false, error: null });
   };
 
   const cerrarDetalle = () => {
     setSeleccionado(null);
-    setClaveVisible(false);
+    setSecretos({ datos: null, cargando: false, error: null });
     setEstadoStream({ datos: null, cargando: false, error: null });
   };
+
+  /**
+   * Pide los valores reales. Cada llamada deja un evento en el log de auditoria,
+   * asi que solo se dispara desde el boton, nunca desde un efecto.
+   */
+  const revelarSecretos = async (canal: Channel) => {
+    setSecretos({ datos: null, cargando: true, error: null });
+    try {
+      const datos = await api.getChannelSecrets(canal.id);
+      if (!montado.current) return;
+      setSecretos({ datos, cargando: false, error: null });
+    } catch (err) {
+      if (!montado.current) return;
+      const mensaje =
+        err instanceof ApiError && err.status === 403
+          ? "Solo un administrador puede ver estos valores."
+          : messageForError(err);
+      setSecretos({ datos: null, cargando: false, error: mensaje });
+    }
+  };
+
+  const ocultarSecretos = () => setSecretos({ datos: null, cargando: false, error: null });
 
   const consultarEstadoStream = async (canal: Channel) => {
     setEstadoStream({ datos: null, cargando: true, error: null });
@@ -328,8 +381,11 @@ export function CanalesView() {
         <Info size={16} aria-hidden />
         <span>
           Pantalla de consulta: la API de administracion solo expone lectura de canales
-          (no hay alta, edicion ni baja). La clave de stream se oculta por defecto y la
-          URL de origen no se muestra porque puede llevar credenciales del proveedor.
+          (no hay alta, edicion ni baja). La clave de stream y la URL de origen llegan
+          enmascaradas desde la API —ni siquiera viajan en la respuesta— porque la URL
+          puede llevar credenciales del proveedor y la clave permite reproducir saltandose
+          el control de suscripciones. Un administrador puede revelarlas canal a canal, y
+          queda registrado.
         </span>
       </p>
 
@@ -392,6 +448,13 @@ export function CanalesView() {
         ) : null}
       </section>
 
+      {/*
+        Inventario de streams: solo admin. Cada fila lleva el nombre del stream
+        (que es el stream_key) y una URL HLS reproducible, o sea el mismo secreto
+        que el listado de canales enmascara — taparlo alli y dejarlo abierto aqui
+        no serviria de nada.
+      */}
+      {isAdmin ? (
       <section className="can-panel" aria-labelledby="can-streams-titulo">
         <div className="can-panel-cabecera">
           <h2 className="can-panel-titulo" id="can-streams-titulo">
@@ -414,6 +477,7 @@ export function CanalesView() {
           emptyMessage="Flussonic no reporta ningun stream."
         />
       </section>
+      ) : null}
 
       <Modal
         open={seleccionado !== null}
@@ -463,10 +527,16 @@ export function CanalesView() {
               </div>
               <div className="can-detalle-fila">
                 <span className="can-detalle-etiqueta">URL de origen</span>
-                <span className="can-detalle-valor can-vacio">
-                  {seleccionado.source_url
-                    ? "configurada (no se muestra: puede contener credenciales)"
-                    : "sin configurar"}
+                <span className="can-detalle-valor can-mono">
+                  {secretos.datos ? (
+                    (secretos.datos.source_url ?? (
+                      <span className="can-vacio">sin configurar</span>
+                    ))
+                  ) : seleccionado.source_url_masked === null ? (
+                    <span className="can-vacio">sin configurar</span>
+                  ) : (
+                    seleccionado.source_url_masked
+                  )}
                 </span>
               </div>
               <div className="can-detalle-fila">
@@ -486,22 +556,53 @@ export function CanalesView() {
               <div className="can-detalle-fila">
                 <span className="can-detalle-etiqueta">Clave de stream</span>
                 <span className="can-detalle-valor can-secreto">
-                  {claveVisible ? (
-                    <span className="can-mono">{seleccionado.stream_key}</span>
+                  {secretos.datos ? (
+                    <span className="can-mono">{secretos.datos.stream_key}</span>
                   ) : (
-                    <span className="can-secreto-oculto">••••••••••</span>
+                    <span className="can-secreto-oculto">
+                      {seleccionado.stream_key_masked || "(vacia)"}
+                    </span>
                   )}
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    icon={claveVisible ? <EyeOff size={15} /> : <Eye size={15} />}
-                    onClick={() => setClaveVisible((visible) => !visible)}
-                  >
-                    {claveVisible ? "Ocultar" : "Mostrar"}
-                  </Button>
+                  {isAdmin ? (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      loading={secretos.cargando}
+                      icon={secretos.datos ? <EyeOff size={15} /> : <Eye size={15} />}
+                      onClick={() =>
+                        secretos.datos ? ocultarSecretos() : void revelarSecretos(seleccionado)
+                      }
+                    >
+                      {secretos.datos ? "Ocultar" : "Revelar"}
+                    </Button>
+                  ) : null}
                 </span>
               </div>
             </div>
+
+            {isAdmin ? (
+              <p className="can-nota">
+                <Info size={16} aria-hidden />
+                <span>
+                  {secretos.datos
+                    ? "Revelado. Este acceso ha quedado registrado en el log de auditoria con tu usuario, el canal y la hora."
+                    : "La clave de stream y la URL de origen se muestran enmascaradas. Revelarlas queda registrado en el log de auditoria."}
+                </span>
+              </p>
+            ) : (
+              <p className="can-nota">
+                <Info size={16} aria-hidden />
+                <span>
+                  La clave de stream y la URL de origen solo las puede ver un
+                  administrador: con ellas se puede construir una URL de reproduccion
+                  que se salta el control de suscripciones.
+                </span>
+              </p>
+            )}
+
+            {secretos.error ? (
+              <Aviso tono="error" mensaje={secretos.error} />
+            ) : null}
 
             <div className="can-bloque">
               <h3>Estado del stream en Flussonic</h3>
