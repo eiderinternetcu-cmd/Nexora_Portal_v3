@@ -20,7 +20,11 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.models.session import Session
+from app.models.session import (
+    Session,
+    SESSION_IP_ADDRESS_MAX_LEN,
+    SESSION_USER_AGENT_MAX_LEN,
+)
 from app.redis_client import (
     key_session,
     key_refresh,
@@ -33,6 +37,17 @@ settings = get_settings()
 
 # Default IPTV session duration (seconds). 4 hours covers a typical viewing session.
 _IPTV_SESSION_TTL = 4 * 3600
+
+
+def _clip(value: str | None, cap: int) -> str | None:
+    """Bound a client-supplied string to what its column accepts.
+
+    Applied HERE rather than at each call site — the two call sites
+    (app/api/stb/playback.py, app/api/client/playback.py) pass headers through
+    unclipped, exactly the shape that overflowed audit_logs.user_agent before
+    AuditService.log grew the same guard (see app/models/audit.py).
+    """
+    return (value or "")[:cap] or None
 
 
 class SessionService:
@@ -136,8 +151,8 @@ class SessionService:
             device_fingerprint=device_fingerprint,
             access_token_jti=access_jti,
             refresh_token_jti=None,
-            ip_address=ip,
-            user_agent=user_agent,
+            ip_address=_clip(ip, SESSION_IP_ADDRESS_MAX_LEN),
+            user_agent=_clip(user_agent, SESSION_USER_AGENT_MAX_LEN),
             expires_at=expires_at,
         )
         db.add(session)
@@ -248,8 +263,8 @@ class SessionService:
             device_fingerprint=device_fingerprint,
             access_token_jti=access_jti,
             refresh_token_jti=refresh_jti,
-            ip_address=ip,
-            user_agent=user_agent,
+            ip_address=_clip(ip, SESSION_IP_ADDRESS_MAX_LEN),
+            user_agent=_clip(user_agent, SESSION_USER_AGENT_MAX_LEN),
             expires_at=expires_at,
         )
         db.add(session)

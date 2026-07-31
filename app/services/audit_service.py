@@ -2,8 +2,23 @@ import uuid
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.audit import AuditLog
+from app.models.audit import (
+    AuditLog,
+    AUDIT_IP_ADDRESS_MAX_LEN,
+    AUDIT_USER_AGENT_MAX_LEN,
+)
 from app.models.user import User
+
+
+def _clip(value: str | None, cap: int) -> str | None:
+    """Bound a client-supplied string to what its column accepts.
+
+    Applied HERE rather than at each call site: log() is the single point every
+    audit row goes through, and the previous arrangement — a `[:512]` literal
+    repeated in two places in auth_service.py, none in the other ~20 callers —
+    is what let the cap drift away from the column and 500 the login path.
+    """
+    return (value or "")[:cap] or None
 
 
 class AuditService:
@@ -44,8 +59,8 @@ class AuditService:
             target_type=target_type,
             target_id=target_id,
             details=details,
-            ip_address=ip_address,
-            user_agent=user_agent,
+            ip_address=_clip(ip_address, AUDIT_IP_ADDRESS_MAX_LEN),
+            user_agent=_clip(user_agent, AUDIT_USER_AGENT_MAX_LEN),
         )
         self.db.add(entry)
         await self.db.flush()

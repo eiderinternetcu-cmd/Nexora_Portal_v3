@@ -7,7 +7,7 @@ import redis.asyncio as aioredis
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
-from app.models.device import Device
+from app.models.device import Device, DEVICE_LAST_IP_MAX_LEN
 from app.models.subscription import Subscription
 from app.models.plan import Plan
 from app.config import get_settings
@@ -23,6 +23,16 @@ from app.services.connection_service import ConnectionService
 from app.services.session_service import SessionService
 
 settings = get_settings()
+
+
+def _clip(value: str | None, cap: int) -> str | None:
+    """Bound a client-supplied string to what its column accepts.
+
+    `ip` here is get_client_ip(request), which under the default
+    CLIENT_IP_SOURCE=legacy returns the raw X-Forwarded-For header value
+    unbounded — same class of bug as sessions.user_agent (app/models/audit.py).
+    """
+    return (value or "")[:cap] or None
 
 
 class DeviceService:
@@ -107,7 +117,7 @@ class DeviceService:
             existing.app_version = data.app_version or existing.app_version
             existing.os_version = data.os_version or existing.os_version
             existing.user_agent = data.user_agent or existing.user_agent
-            existing.last_ip = ip
+            existing.last_ip = _clip(ip, DEVICE_LAST_IP_MAX_LEN)
             existing.last_seen_at = datetime.now(timezone.utc)
             await self.db.flush()
             return existing
@@ -144,7 +154,7 @@ class DeviceService:
             app_version=data.app_version,
             os_version=data.os_version,
             user_agent=data.user_agent,
-            last_ip=ip,
+            last_ip=_clip(ip, DEVICE_LAST_IP_MAX_LEN),
             last_seen_at=datetime.now(timezone.utc),
             device_secret_hash=hash_device_secret(plaintext_secret),
             status="pending" if settings.device_secret_enforce else "active",
@@ -182,7 +192,7 @@ class DeviceService:
 
         now = datetime.now(timezone.utc)
         device.last_seen_at = now
-        device.last_ip = ip
+        device.last_ip = _clip(ip, DEVICE_LAST_IP_MAX_LEN)
         if data.app_version:
             device.app_version = data.app_version
         await self.db.flush()

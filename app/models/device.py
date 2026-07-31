@@ -65,3 +65,29 @@ class Device(Base):
 
     def __repr__(self) -> str:
         return f"<Device {self.device_id[:20]}... type={self.device_type} blocked={self.is_blocked}>"
+
+
+# ── Application-side caps ────────────────────────────────────────────────────
+# Same pattern as app/models/audit.py and app/models/session.py.
+# DeviceService.register()/heartbeat() write last_ip=ip straight onto the model.
+# `ip` is app.core.dependencies.get_client_ip(request), which under the default
+# CLIENT_IP_SOURCE=legacy returns the raw X-Forwarded-For header value with no
+# length bound — the same class of client-controlled string that overflowed
+# audit_logs.user_agent. devices.last_ip is varchar(45); nothing capped it
+# before the INSERT.
+DEVICE_LAST_IP_MAX_LEN = 45  # max INET6_ADDRSTRLEN with a scope id
+
+
+def _assert_fits(column_name: str, cap: int) -> None:
+    """Fail at import if a cap could no longer fit its column."""
+    length = getattr(Device.__table__.c[column_name].type, "length", None)
+    if length is not None and cap > length:
+        raise RuntimeError(
+            f"devices.{column_name} holds {length} chars but the application "
+            f"cap is {cap}: values between {length + 1} and {cap} would pass "
+            "truncation and then fail the INSERT. Align the column (migration) "
+            "and the cap in app/models/device.py."
+        )
+
+
+_assert_fits("last_ip", DEVICE_LAST_IP_MAX_LEN)

@@ -44,3 +44,38 @@ class Session(Base):
 
     def __repr__(self) -> str:
         return f"<Session sub={self.subscriber_id} jti={self.access_token_jti[:8]}...>"
+
+
+# ── Application-side caps ────────────────────────────────────────────────────
+# Same pattern as app/models/audit.py: SessionService.create_iptv_session wrote
+# ip_address/user_agent (both client-supplied — a header and get_client_ip())
+# straight onto the model with no cap of its own. sessions.user_agent is
+# varchar(512) in both migration 002 and this file, so
+# tests/test_migration_schema_parity.py is structurally blind to this — ORM and
+# migration agree, the divergence is between the column and what the service
+# actually wrote. A User-Agent over 512 chars (routine for Android TV / STB
+# clients — the same population that forced os_version from 32 to 512 in
+# app/schemas/client.py) hits StringDataRightTruncation -> 500 on
+# /api/stb/auth/play and /api/client/playback/authorize.
+#
+# One definition each, applied centrally in SessionService (the two entry
+# points that persist client-supplied ip/user_agent), and _assert_fits below
+# fails LOUDLY at import if a cap ever outgrows its column.
+SESSION_USER_AGENT_MAX_LEN = 512
+SESSION_IP_ADDRESS_MAX_LEN = 45  # max INET6_ADDRSTRLEN with a scope id
+
+
+def _assert_fits(column_name: str, cap: int) -> None:
+    """Fail at import if a cap could no longer fit its column."""
+    length = getattr(Session.__table__.c[column_name].type, "length", None)
+    if length is not None and cap > length:
+        raise RuntimeError(
+            f"sessions.{column_name} holds {length} chars but the application "
+            f"cap is {cap}: values between {length + 1} and {cap} would pass "
+            "truncation and then fail the INSERT. Align the column (migration) "
+            "and the cap in app/models/session.py."
+        )
+
+
+_assert_fits("user_agent", SESSION_USER_AGENT_MAX_LEN)
+_assert_fits("ip_address", SESSION_IP_ADDRESS_MAX_LEN)

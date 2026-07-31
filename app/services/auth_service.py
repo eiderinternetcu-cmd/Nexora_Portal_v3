@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 
 from app.config import get_settings
-from app.models.user import User
+from app.models.user import User, USER_LAST_LOGIN_IP_MAX_LEN
 from app.core.security import (
     verify_password,
     create_access_token,
@@ -28,6 +28,16 @@ from app.services.audit_service import AuditService
 from app.schemas.auth import TokenResponse
 
 settings = get_settings()
+
+
+def _clip(value: str | None, cap: int) -> str | None:
+    """Bound a client-supplied string to what its column accepts.
+
+    `ip` here is get_client_ip(request), which under the default
+    CLIENT_IP_SOURCE=legacy returns the raw X-Forwarded-For header value
+    unbounded — same class of bug as sessions.user_agent (app/models/audit.py).
+    """
+    return (value or "")[:cap] or None
 
 
 class AuthService:
@@ -144,9 +154,16 @@ class AuthService:
                     "username": username[:64],
                     "lockout_enabled": settings.login_lockout_enabled,
                 },
-                # ip_address is String(45); X-Forwarded-For can carry anything.
-                ip_address=(ip or "")[:45] or None,
-                user_agent=(user_agent or "")[:512] or None,
+                # Not clipped here: AuditService.log bounds both fields against
+                # the caps declared next to the column (app/models/audit.py).
+                # These used to be `[:45]` / `[:512]` literals, and the 512 was
+                # WRONG — the real column was varchar(255), so a 256-512 char
+                # User-Agent (TV/STB clients) passed the truncation and then
+                # failed the INSERT, turning a login into a 500. Migration 009
+                # aligns the column; keeping the bound in one place next to it is
+                # what stops the two drifting apart again.
+                ip_address=ip,
+                user_agent=user_agent,
             )
             await self.db.commit()
         except Exception:
@@ -220,7 +237,10 @@ class AuthService:
         await self.db.execute(
             update(User)
             .where(User.id == user.id)
-            .values(last_login_at=datetime.now(timezone.utc), last_login_ip=ip)
+            .values(
+                last_login_at=datetime.now(timezone.utc),
+                last_login_ip=_clip(ip, USER_LAST_LOGIN_IP_MAX_LEN),
+            )
         )
         # Immutable audit trail of admin/reseller logins (M2). Rides the login
         # transaction (unlike the failure path, which has no transaction to ride):
@@ -232,8 +252,9 @@ class AuthService:
             target_type="user",
             target_id=user_id,
             details={"outcome": "success", "role": role},
-            ip_address=(ip or "")[:45] or None,
-            user_agent=(user_agent or "")[:512] or None,
+            # Bounded by AuditService.log — see the note in _audit_login.
+            ip_address=ip,
+            user_agent=user_agent,
         )
         await self.db.commit()
 
