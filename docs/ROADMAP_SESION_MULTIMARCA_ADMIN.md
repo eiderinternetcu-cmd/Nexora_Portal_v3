@@ -106,10 +106,13 @@ nginx). Orden natural: cerrar §3.1, luego montar el panel.
 
 Al comparar con el panel Legon, estas funciones de "cliente" quedaron fuera a propósito:
 
-- **Servicios add-on por cliente (VOD, Timeshift, VIP)** — ¿La Red vende extras? Necesita
-  modelo nuevo + migración de BD.
+- **Servicios add-on por cliente (VOD, Timeshift, VIP)** — ✅ **decidido (2026-07-31): NO se
+  venden hoy; se contemplan a futuro.** No se construye el modelo ni la migración ahora. Regla
+  de diseño mientras tanto: no cerrar la puerta — el entitlement se resuelve por plan
+  (`plan_channels`), así que añadir una capa por-cliente después es aditivo, no una reescritura.
+  Reabrir cuando el add-on entre al plan comercial.
 - **Límite de dispositivos por cliente** — hoy es por plan. ¿Se quiere override por cliente?
-  Migración de BD.
+  Migración de BD. **Sin decidir.**
 - **Fecha de fin editable en línea / cuentas VIP sin caducidad** — se puede, es trabajo de
   API + UI.
 

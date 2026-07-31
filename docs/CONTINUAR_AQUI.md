@@ -1,73 +1,81 @@
 # Continuar aquí — punto de retoma
 
-_Handoff a 2026-07-27. Para el detalle completo: `docs/ROADMAP_SESION_MULTIMARCA_ADMIN.md`.
-Este archivo es solo "por dónde seguir"._
+_Handoff a 2026-07-31. Detalle de la última sesión: `docs/INFORME_SESION_2026-07-31.md`.
+Backlog completo y priorizado: `docs/ROADMAP.md`. Este archivo es solo "por dónde seguir"._
 
-Rama: **`feat/client-api-blockers`** (37 commits por delante de `main`, todo subido, árbol
-limpio). Para retomar: `git checkout feat/client-api-blockers`.
+Rama: **`feat/client-api-blockers`**. Para retomar: `git checkout feat/client-api-blockers`.
 
 ---
 
 ## Estado en una línea
 
-Web player multi-marca y **certificado de tvdigital.laredtelco.com** ya en producción.
-Panel de administración y cambios de API: construidos, probados, **commiteados SIN
-desplegar**.
+Web player multi-marca y certificado de `tvdigital.laredtelco.com` en producción. Panel de
+administración, cambios de API, alerting de nodos y endurecimiento de login: **construidos,
+probados y commiteados, sin desplegar**.
 
 ---
 
 ## Lo siguiente, en orden
 
-### 1. Verificar las ESCRITURAS del panel en local
-El panel está probado leyendo, no escribiendo. Antes de desplegarlo, probar a mano:
-crear un suscriptor, guardar una lista blanca de canales en un plan, revocar una sesión.
-Es entorno local, es seguro.
+### 1. Desplegar la rama a producción (necesita ventana + visto bueno)
+Es lo más valioso que está parado. Reinicia el servicio que autoriza el playback de clientes
+reales, así que en horario de bajo tráfico. Todo aditivo, **345 tests en verde**.
 
-- Panel corriendo en **http://127.0.0.1:5175** (contenedor `nexora_admin_test`). Login
-  `admin` / `Admin1234!`.
-- Si el contenedor ya no está, reconstruir:
-  ```
-  cd E:\WEBSITE\nexora_api\admin_panel
-  docker build -t nexora_admin_panel:test .
-  docker run -d --name nexora_admin_test --network nexora_api_nexora_net -p 5175:80 nexora_admin_panel:test
-  ```
-- API local en http://127.0.0.1:8000 (contenedor `nexora_api`, corre con `--reload`, ya
-  tiene los cambios de la sesión).
+Patrón (igual que el web player): SFTP de `app/` al servidor +
+`docker compose -f docker-compose.production.yml build api` + `up -d --no-deps api`.
+**NUNCA `--remove-orphans`** (borra el stack de transcodificación).
 
-### 2. Desplegar la API a producción (necesita ventana + visto bueno)
-Reinicia el servicio que autoriza el playback de clientes reales. Todo aditivo, 315 tests
-verdes, pero hacerlo en horario de bajo tráfico. Patrón (igual que el web player):
-SFTP de `app/` al servidor + `docker compose -f docker-compose.production.yml build api` +
-`up -d --no-deps api`. **NUNCA `--remove-orphans`** (borra el stack de transcodificación).
+⚠️ **Aplicar Alembic 008 en el mismo despliegue.** Sin ella, `plan_channels` responde **500** en
+producción: la 005 ya corrió allí creando un índice donde el código espera una constraint. Es un
+bug bloqueante que se atrapó a tiempo — ver §1 del informe de sesión.
 
-### 3. Montar el panel de administración en producción
-Ya se puede: su vhost depende del nginx que se arregló al desplegar el certificado.
-Necesita su contenedor + un `server` nuevo en la config de nginx (mismo patrón que
-tvdigital).
+Después: montar el panel de administración (contenedor + vhost nuevo, mismo patrón que tvdigital;
+el nginx ya está factorizado).
 
-### 4. Crear el hook de renovación de certbot en el host
-Con dos certificados de fechas distintas, sin hook la caducidad falla intermitente por
-dominio. Script listo en `deploy/RUNBOOK_EDGE_MULTIDOMINIO.md`.
+### 2. Cerrar el caso `tc-mia` — cinco minutos, solo lectura
+```
+sudo docker exec nexora_nginx nginx -T 2>/dev/null | grep -nE 'server_name|location \^~ /stream/'
+```
+Si algún `server_name` no lista los cuatro nodos, queda confirmado que el 200 sin token era un
+`location` ausente cayendo al SPA (200 con HTML, cero vídeo) y **no un bypass** — y entonces lo
+urgente es que los canales de Miami no se ven en esa marca. Análisis: `docs/ANALISIS_BYPASS_TCMIA.md`.
 
-### 5. Verificar el hallazgo tc-mia
-`tc-mia` (torre Miami) devolvió 200 a un stream SIN token; los otros 3 nodos dan 401.
-Posible bypass del gate. Preexistente, del frente de transcodificación. Ver el roadmap.
+### 3. Decidir la fuga de `source_url` en el panel
+`GET /api/admin/channels` devuelve `stream_key` y `source_url` en crudo a admin **y reseller**.
+No se pintan, pero viajan en la respuesta y son visibles en devtools; `source_url` puede llevar
+credenciales del proveedor. ¿Enmascarar siempre, solo admin, o endpoint de "revelar" con auditoría?
+
+### 4. Flags que quedan por activar (uno por vez, con observación y rollback)
+- `PLAYBACK_IP_BINDING_MODE=soft` → `strict` (P0.1) — último ítem vivo de M1.
+- `NODE_PROBE_MODE=hls_signed` (P0.5) — antes, confirmar que `NODE_PROBE_EDGE_BASE_URL` resuelve
+  desde el contenedor `api` en producción.
+- `LOGIN_LOCKOUT_ENABLED=true` (NX-AUTH).
+- `STREAM_GRANT_MAX_LIFETIME_SECONDS` sigue en **0 = ilimitado**: mientras tanto, esa es la
+  latencia de revocación real del sistema. Definir el valor (p. ej. 6 h).
+
+### 5. Crear el hook de renovación de certbot en el host
+Con dos certificados de fechas distintas, sin hook la caducidad falla intermitente por dominio.
+Script listo en `deploy/RUNBOOK_EDGE_MULTIDOMINIO.md`.
 
 ---
 
-## Decisiones de negocio pendientes (no bloquean nada técnico)
-- ¿La Red vende servicios add-on (VOD/Timeshift) por cliente? → habilita esa función +
-  migración de BD.
-- ¿Límite de dispositivos por cliente, además de por plan? → migración de BD.
+## Decisiones de negocio
+- ~~¿La Red vende servicios add-on (VOD/Timeshift) por cliente?~~ → **decidido 2026-07-31: no se
+  venden hoy, se contemplan a futuro.** No construir el modelo ni la migración; queda en P4.
+- **Pendiente:** ¿límite de dispositivos por cliente, además de por plan? → migración de BD.
 
 ---
 
 ## Notas de operación que NO se deben olvidar
-- **Producción NO es git.** El código llega por copia; comparar el conf vivo contra el
-  versionado ANTES de tocar (ya evitó borrar la ruta de tc-main una vez).
+- **Producción NO es git.** El código llega por copia; comparar el conf vivo contra el versionado
+  ANTES de tocar (ya evitó borrar la ruta de tc-main una vez).
 - **Antes de activar cuentas de reseller**: los suscriptores con `created_by` nulo quedan
   invisibles para cualquier reseller (solo el admin los ve). Asignarles dueño con un UPDATE.
-- Acceso SSH a producción: credencial en `.claude/settings.json` (bloque `nexora-ssh`), no
-  en `.env`. El helper de paramiko para correr comandos es de patrón conocido; si el
-  scratchpad de la sesión ya no existe, se reescribe en 30 líneas (lee la credencial dentro,
-  censura la salida, `sudo -S` por stdin).
+- **`docker exec nexora_api pytest` NO valida nada** — `./tests` no está montado y la imagen no
+  trae `requirements-dev`, así que corre la copia horneada. Usar el venv del host contra
+  `localhost:5433` / `localhost:6380` con `TEST_DATABASE_URL` y `TEST_REDIS_URL` puestas.
+- **La suite no puede detectar divergencias ORM↔migración** (`conftest.py` construye el esquema
+  desde el ORM). Ya dejó pasar un bug bloqueante. → P1.4 del roadmap.
+- **`nexora_transcoder` está parado a propósito**: la cabecera de Esmeraldas filtra por IP y esta
+  máquina no está en la lista blanca del NOC. No relanzarlo sin resolver eso.
+- Acceso SSH a producción: credencial en `.claude/settings.json` (bloque `nexora-ssh`), no en `.env`.

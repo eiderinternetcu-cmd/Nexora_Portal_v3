@@ -1,6 +1,13 @@
 # PROJECT_STATUS.md — Nexora API
 _Last updated: 2026-05-18_
 
+> ⚠️ **Este documento es histórico: refleja el estado hasta la Fase 3 (mayo 2026) y está
+> desfasado.** Habla de 21 canales cuando hoy hay 41, y de "Fase 4 en progreso" cuando M1 y M2
+> ya están desplegados en producción (Alembic 007).
+>
+> Para el estado real y lo pendiente: **[`docs/ROADMAP.md`](docs/ROADMAP.md)**.
+> Por dónde seguir: **[`docs/CONTINUAR_AQUI.md`](docs/CONTINUAR_AQUI.md)**.
+
 ---
 
 ## FASE 1 — COMPLETADA ✅

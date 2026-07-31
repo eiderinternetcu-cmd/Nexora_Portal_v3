@@ -1,10 +1,13 @@
 # ROADMAP — Nexora API (lo que está PENDIENTE)
 
-_Actualizado: 2026-07-14 (M1 code-complete: PR #11)_
+_Actualizado: 2026-07-31 (sesión de cierre de backlog local — ver `docs/INFORME_SESION_2026-07-31.md`)_
 
-> Este documento lista **solo lo que falta**. Lo ya entregado está en `PROJECT_STATUS.md`.
+> Este documento lista **solo lo que falta**. Lo ya entregado está en la línea base de abajo.
 > Ordenado por dependencias reales, no por deseo. Alineado con `docs/nexora-best-of/12_ROADMAP_PRIORIZADO.md`
 > (hitos M1–M5) y `11_BACKLOG_IMPLEMENTACION.md` (IDs `NX-*`).
+>
+> ⚠️ Este fichero **sustituye** al PR #15 (`docs/roadmap-m1-m2-deployed`), que quedó obsoleto:
+> su contenido está incorporado aquí y además corregido. Ciérralo en vez de mergearlo.
 
 ---
 
@@ -15,17 +18,32 @@ _Actualizado: 2026-07-14 (M1 code-complete: PR #11)_
 | Fases 1–3 (auth, Client API, catálogo, Flussonic, web player, multi-device) | ✅ |
 | Fase 4 · Bloque 0 (M3U real, 24→43 canales, multi-nodo) · Bloque 1 (observabilidad base, hls.js hardening) | ✅ |
 | Deploy producción `nexoraplay.net` (HTTPS, `/stream/*` same-origin, UFW lockdown) | ✅ |
-| Alembic **005** (`plan_channels`) + seed | ✅ |
-| **PROD-2A** `ENTITLEMENT_ENFORCE=true` (anti-IDOR por plan) | ✅ |
-| **PROD-2B** `JWT_REQUIRE_AUD=true` (iss/aud/type estrictos) | ✅ |
-| **PROD-2C** `SIGNED_URL_ENFORCE=true` + Nginx `auth_request` + grant Redis de segmentos | ✅ validado (13 min, 396/396 req, 0 fallos) |
-| **Argon2id** para hashing de passwords | ✅ ya implementado (`app/core/security.py`) |
-| **M1 device secret** (identidad fuerte, flag-gated) + **grant hardening** | ✅ código en PR #11, CI verde, Alembic **006** (no mergeado) |
+| **PROD-2A/2B/2C** (entitlement, jwt-aud, signed-url + Nginx `auth_request` + grant) | ✅ en prod (validado 13 min, 396/396 req) |
+| **Argon2id** para hashing de passwords | ✅ |
+| **M1 — device secret (flag-gated) + grant hardening** | ✅ **en prod** (PRs #9–12, Alembic **006**) |
+| **NX-CONC — concurrencia atómica (Lua)** | ✅ **en prod** (PR #12) |
+| **M2 — métricas de playback + auditoría inmutable (trigger append-only) + correlation-id** | ✅ **en prod** (PR #13, Alembic **007**) |
+| Web player multi-marca (Nexora + La Red por hostname) + certificado `tvdigital.laredtelco.com` | ✅ en prod |
+| Panel de administración (`admin_panel/`, 8 secciones) — lecturas **y escrituras** verificadas | 🟡 en la rama, **sin desplegar** |
+| Backend: `plan_channels` (4 endpoints), scoping por reseller, `/docs` cerrado, CORS configurable, listados con orden estable | 🟡 en la rama, **sin desplegar** |
+| **P0.5 — probe de nodos vía HLS firmado** (flag `NODE_PROBE_MODE`, default legacy) | 🟡 en la rama, **sin activar** |
+| **NX-AUTH — lockout endurecido + auditoría de login** (flag `LOGIN_LOCKOUT_ENABLED`, default legacy) | 🟡 en la rama, **sin activar** |
+| **Alembic 008** — repara la constraint de `plan_channels` que la 005 creó como índice | 🟡 en la rama, **sin aplicar en prod** |
 
-**Hito M1 (playback seguro) está cerrado en código.** Lo único que falta para dar M1 por
-completo es **activar 2D (`PLAYBACK_IP_BINDING_MODE=soft`) en producción** (P0.1) — un flip de
-flag con autorización. El resto de M1 (entitlement, gate, signed-url, Argon2id, device secret,
-grant hardening) ya está entregado.
+**Prod: Alembic 007. M1 ~95% y M2 ~90% desplegados.**
+**% actual:** MVP streaming seguro+operable **~90%** · Visión completa OTT **~44%**.
+
+### Correcciones al roadmap anterior (cosas que se daban por pendientes y no lo estaban, o al revés)
+
+1. **El lockout de login YA existía y estaba vivo en producción** (`AuthService._check_lockout`,
+   contadores por usuario e IP, respuesta 423). El roadmap lo listaba como pendiente. Lo que
+   faltaba de verdad era la **auditoría de fallos** y corregir dos defectos del que ya había
+   (ver P2b).
+2. **El "bypass" de `tc-mia` probablemente no es un bypass.** Ver P0.7 — la explicación que
+   encaja con toda la evidencia versionada es un `location` ausente, no un gate abierto.
+3. **`docker exec nexora_api pytest` nunca ha corrido el código editado** (`./tests` no se monta
+   y la imagen no trae `requirements-dev`). Cualquier verde reportado por esa vía en el pasado
+   es sospechoso. Ver P1.5.
 
 ---
 
@@ -35,117 +53,177 @@ grant hardening) ya está entregado.
 
 ---
 
-## 🔴 P0 — Cerrar M1 (playback seguro) y limpiar deuda inmediata
+## 🔴 P0 — Cerrar M1 y desplegar lo que ya está construido
 
-### P0.1 · PROD-Fase 2D: IP-binding del playback token — **ÚNICO ítem vivo de M1**
-El token ya lleva el claim `cip` (hash de IP) y el gate Nginx ya pasa `X-Real-IP` real al backend.
-Solo falta **activar el enforcement**, escalonado:
-- `PLAYBACK_IP_BINDING_MODE=soft` → warn + permite. Observar mismatches varios días (clientes móviles cambian de IP).
+### P0.6 · Desplegar la rama `feat/client-api-blockers` — **el lote más grande sin desplegar**
+40+ commits: panel de administración, `plan_channels`, scoping por reseller, `/docs` cerrado,
+CORS por configuración, listados con orden estable, y lo de esta sesión. **Riesgo moderado**:
+reinicia el servicio que autoriza el playback de clientes reales. Todo aditivo, suite en verde.
+- **Requiere ventana de bajo tráfico y visto bueno del dueño.**
+- Patrón (igual que el web player): SFTP de `app/` + `docker compose -f docker-compose.production.yml build api` + `up -d --no-deps api`. **NUNCA `--remove-orphans`.**
+- ⚠️ **Aplicar Alembic 008 en el mismo despliegue.** Sin ella, `plan_channels` da 500 en prod
+  (la 005 ya corrió allí creando un índice donde el código espera una constraint).
+- Después: montar el panel de administración (contenedor + vhost; el nginx ya está factorizado).
+
+### P0.1 · PROD-Fase 2D: IP-binding del playback token — **último ítem vivo de M1**
+El token ya lleva el claim `cip` y el gate pasa `X-Real-IP` real al backend. Falta activar:
+- `PLAYBACK_IP_BINDING_MODE=soft` → warn + permite. Observar mismatches varios días (los clientes móviles cambian de IP).
 - Solo si la evidencia lo permite → `strict` (mismatch → 403).
 - **Requiere autorización explícita por flag.** Rollback: quitar la línea de `.env.production` + recrear api.
 - _Referencia:_ `deploy/RUNBOOK_PRODUCTION_P0.md` · **AC:** misma IP → 200; otra IP → 200+WARN (soft) / 403 (strict).
 
-### P0.2 · Hardening del grant de segmentos — ✅ HECHO (PR #11, código; falta activar en prod)
-Resuelto en código (flag-gated, defaults que no cambian prod):
-1. **Latencia de revocación** → **`STREAM_GRANT_MAX_LIFETIME_SECONDS`** (default 0 = ilimitado/legacy): el grant guarda su seed epoch y muere al alcanzar el tope absoluto, sin importar la renovación. _Pendiente: definir el valor de prod (p. ej. 6 h) y activarlo._
-2. **Token expirado = 401 duro** → **`STREAM_GRANT_TOKEN_FALLBACK`** (default on): un token presente-pero-expirado cae a un grant válido del mismo node+stream+IP (continuidad). Ya activo por defecto.
-- Implementado en `app/services/stream_auth_service.py` + `app/api/internal/stream_auth.py`; 11 tests nuevos.
+### P0.2 · Tope de vida del grant — falta DEFINIR el valor de producción
+`STREAM_GRANT_MAX_LIFETIME_SECONDS` está implementado y desplegado, pero vale **0 = ilimitado**
+(`app/config.py:117`). Mientras siga en 0, un grant renovado cada <180 s vive indefinidamente:
+esa es, literalmente, la latencia de revocación del sistema. Decidir el valor (p. ej. 6 h) y activarlo.
 
-### P0.3 · Deuda de versionado — PRs abiertos (falta mergear)
-- **PR #9** `infra: version production auth_request gate` — versiona el `nexoraplay.conf` real de prod + runbook. Abierto, `MERGEABLE`.
-- **PR #10** `chore: repo housekeeping + pending-work roadmap` — `.dockerignore` versionado, docs de diseño, `.gitignore` endurecido, este ROADMAP. Abierto.
-- **PR #11** `feat(m1): device secret + grant hardening` — código de M1, CI verde, Alembic 006. Abierto.
-- Orden sugerido de merge: **#9 → #10 → #11** (sin conflictos entre sí). Tras mergear: consolidar los `.md` de raíz en `docs/` (actualizar las rutas que lee `mcp_server/server.py`).
+### P0.5 · Alerting de nodos — implementado, falta activar
+El backend **no alcanza los orígenes Flussonic** (`181.78.246.211:8002`, `38.210.187.13:8002` →
+timeout); solo nginx tiene ruta. Por eso el health-check desde el backend nunca fue viable.
+Implementada la opción recomendada: el monitor prueba **HLS firmado a través del edge**, señal
+end-to-end real (ejercita gate + nodo + stream de una vez).
+- Flags: `NODE_PROBE_MODE` (`origin` por defecto → `hls_signed`), `NODE_PROBE_EDGE_BASE_URL`,
+  `NODE_PROBE_TIMEOUT_SECONDS`, `NODE_PROBE_STREAMS`.
+- El token del probe lleva el claim firmado `pb`: el gate **no le siembra grant de segmentos**.
+- **Pendiente:** activar el flag tras P0.6 y confirmar que `NODE_PROBE_EDGE_BASE_URL` resuelve
+  desde el contenedor `api` en producción.
 
-### P0.4 · co-main caído (externo)
-El nodo Flussonic `co-main` (38.210.187.13) está **caído** → 4 canales sin servicio. Es una fuente externa.
-→ Health check + **alerta** de nodo/stream caído, y decidir política de **fallback** (enlaza con P2.2 `NX-FLU`).
+### P0.7 · Cerrar el caso `tc-mia` — falta UNA sonda de solo lectura
+`tc-mia` devolvió 200 a un stream sin token; los otros 3 nodos dan 401. El análisis completo
+(`docs/ANALISIS_BYPASS_TCMIA.md`) concluye que la hipótesis líder **no es un bypass**: el
+`location /stream/tc-mia/` no existía en el vhost probado, la petición cayó al catch-all del SPA
+y `try_files … /index.html` devolvió **200 con HTML** — cero vídeo. Si se confirma, el impacto es
+de **disponibilidad** (los canales de Miami no se ven en esa marca), no de seguridad.
+- Causa estructural: `deploy/transcode/patch_nginx_tc_mia.py` inserta **solo la primera**
+  coincidencia (un vhost) y su guardián de idempotencia impide replicarla al segundo.
+- **Sonda discriminante** (solo lectura, en el servidor):
+  `sudo docker exec nexora_nginx nginx -T 2>/dev/null | grep -nE 'server_name|location \^~ /stream/'`
+  Si algún `server_name` no lleva los cuatro nodos → hipótesis confirmada.
+
+### P0.8 · Fuga de `stream_key` / `source_url` en el panel — **decisión de diseño pendiente**
+`GET /api/admin/channels` devuelve ambos en crudo para los 41 canales, y lo consumen **admin y
+reseller**. El frontend nunca los pinta (hay comentarios en `CanalesView.tsx` reconociendo el
+riesgo), pero la respuesta de red sí los lleva: visible en devtools para cualquiera con acceso al
+panel. `source_url` puede llevar usuario y contraseña del origen embebidos.
+- Opciones: enmascarar siempre · exponer solo a `admin` · endpoint de "revelar" aparte con auditoría.
+
+### P0.4 · `co-main` caído (externo)
+El nodo Flussonic `co-main` (38.210.187.13) está **caído** → 4 canales sin servicio. Fuente externa.
+→ Enlaza con P0.5 (alerta) y P2.2 (failover).
 
 ---
 
-## 🟠 P1 — Estabilización de playback y entornos
+## 🟠 P1 — Estabilización de playback, entornos y verificación
+
+### P1.4 · Paridad migración ↔ ORM — **el agujero que dejó pasar el bug de la 005**
+`tests/conftest.py::db_session` construye el esquema con `Base.metadata.create_all()` desde el
+modelo ORM. Consecuencia: **ninguna divergencia entre el ORM y lo que Alembic produce de verdad
+puede ser detectada por la suite**, por muchos tests que haya. La 005 declaraba un índice único
+donde el modelo declaraba una `UniqueConstraint`, y `ON CONFLICT ON CONSTRAINT` reventaba con 500
+en cualquier base construida por migraciones — es decir, en producción. Los 345 tests seguían en verde.
+→ Test que corra `alembic upgrade head` sobre una base efímera y compare el esquema resultante
+contra `Base.metadata` (`sqlalchemy.inspect` o `alembic check`).
+
+### P1.5 · Los tests no corren dentro del contenedor `api`
+`docker-compose.yml` no monta `./tests` en `nexora_api` y la imagen no instala
+`requirements-dev.txt`. `docker exec nexora_api pytest` ejecuta la copia horneada en la imagen,
+no el código editado — un falso verde esperando a ocurrir, y el comando que la documentación
+recomendaba. Mientras tanto, la vía correcta es el venv del host contra los puertos publicados
+(`localhost:5433` / `localhost:6380`) con `TEST_DATABASE_URL` y `TEST_REDIS_URL` puestas.
 
 ### P1.1 · Stress tests de playback (Fase 4 · Bloque 3 — nunca ejecutado)
 Con métricas encendidas (`/api/admin/metrics`, `/api/admin/sessions/live`):
-- Zapping rápido (5 canales en 30 s) → detectar sesiones zombie y falsos 409.
+- Zapping rápido (5 canales en 30 s) → sesiones zombie y falsos 409.
 - Playback continuo 3–6 h → memory leaks en browser, limpieza del ZSET.
 - Reconexión de red (WiFi 30 s off) → retry de hls.js recupera.
 - Reinicio de `api` y de `redis` → el cliente reconecta; `authorize` sigue funcionando.
 - 3 usuarios simultáneos del mismo suscriptor → límite de devices + concurrencia del ZSET.
 - Heartbeat timeout (3 min sin latir) → el ZSET expira y corta.
 
-### P1.2 · Concurrencia atómica (`NX-CONC`)
-El check-and-add del ZSET de conexiones no es atómico → riesgo de exceder `max_connections` bajo carrera.
-→ Mover a **script Lua** en Redis. **AC:** nunca excede el límite bajo concurrencia; 0 falsos 409 en zapping.
-
 ### P1.3 · Entorno de STAGING real (hoy NO existe)
-Producción se validó **directo contra prod** porque nunca hubo staging. El runbook `deploy/RUNBOOK_STAGING_P0.md` está escrito pero **sin ejecutar**.
-- Servidor `staging.nexoraplay.net` (2.25.68.163, Ubuntu 24.04) ya provisto; **ZeroTier instalado y unido** a la red `633e31d8a2cf3c84`.
-- 🔴 **Bloqueado:** el nodo `4c3f6acbc9` está en `ACCESS_DENIED` → hay que **autorizarlo en el controller self-hosted** (`633e31d8a2` @ 35.209.188.59), no en ZeroTier Central.
-- Luego: levantar stack aislado (Postgres/Redis/api/nginx propios) para probar flags **antes** de prod.
+Producción se validó **directo contra prod**. El runbook `deploy/RUNBOOK_STAGING_P0.md` está
+escrito pero **sin ejecutar**.
+- Servidor `staging.nexoraplay.net` (2.25.68.163, Ubuntu 24.04) provisto; ZeroTier unido a `633e31d8a2cf3c84`.
+- 🔴 **Bloqueado:** el nodo `4c3f6acbc9` está en `ACCESS_DENIED` → autorizarlo en el controller
+  self-hosted (`633e31d8a2` @ 35.209.188.59), no en ZeroTier Central.
 
 ---
 
 ## 🟡 P2 — Observabilidad y resiliencia
 
-### P2.1 · Observabilidad extendida (`NX-MON`, Fase 4 · Bloque 4)
-- Contador `playback_failures` (incrementar cuando el gate devuelve 401/403).
-- **Alertas de stream/nodo caído** (tarea periódica sobre `get_stream_status()`), incl. co-main.
-- `/api/admin/streams` mejorado: `is_active` (DB) vs `alive` (Flussonic).
-- Logs estructurados con `correlation_id` por request (structlog).
-- Métricas Prometheus/OTel.
+### P2.1 · Observabilidad extendida (`NX-MON`) — mayormente entregada en M2
+Entregado: métricas de playback, auditoría inmutable, correlation-id.
+Pendiente: alertas de stream/nodo caído (depende de **P0.5**), `/api/admin/streams` con
+`is_active` (DB) vs `alive` (Flussonic), métricas Prometheus/OTel.
 
-### P2.2 · Multi-Flussonic Registry + failover (`NX-FLU`, Fase 4 · Bloque 5)
-Hoy `get_flussonic_node_client()` es un stub y el `.env` lista los nodos a mano.
-→ `app/integrations/flussonic_registry.py` formal (`node_id`, `base_url`, `region`, `priority`, `is_healthy`) + health check periódico + **failover de nodo**. Sin geo-routing todavía.
-**AC:** failover de nodo probado (relevante ya, por co-main).
+### P2.2 · Multi-Flussonic Registry + failover (`NX-FLU`)
+`get_flussonic_node_client()` sigue siendo un stub y el `.env` lista los nodos a mano.
+→ `app/integrations/flussonic_registry.py` formal (`node_id`, `base_url`, `region`, `priority`,
+`is_healthy`) + health check periódico + **failover de nodo**. Sin geo-routing todavía.
+**AC:** failover probado (relevante ya, por co-main).
 
 ---
 
-## 🟡 P2b — Seguridad restante del MVP (completa M1/M2)
+## 🟡 P2b — Seguridad restante del MVP
 
 | ID | Pendiente | AC |
 |---|---|---|
-| `NX-DEV` | ✅ **base hecha en PR #11** (flag `DEVICE_SECRET_ENFORCE`): secreto por device + `status` pending/active, activación con secreto. _Falta para activarlo:_ que el web player/STB guarden y presenten el secreto (otro repo) + rate-limit de re-binding + handshake HMAC opcional | Device sin secret válido no obtiene token; MAC sola es insuficiente |
-| `NX-AUTH` | **Argon2id ya ✅**; falta lockout por N fallos, **auditoría de login admin**, (MFA opcional) | Credenciales malas → 401; login admin auditado |
-| `NX-AUDIT` | `audit_log` **inmutable/append-only** + particionado + retención | Consulta filtrable; no se puede alterar |
+| `NX-NODE` | **NUEVO.** El claim `node` **falla abierto**: `payload.get("node") not in (None, node)` (`stream_auth_service.py:439`) — un token **sin** claim `node` vale en **cualquier** nodo, mientras que `sk` (`:437`) falla cerrado. Hoy no alcanzable (los 41 canales tienen nodo asignado, ninguno NULL), pero latente. Falta además lista blanca de nodos | Token sin claim `node` → 403, no 200 |
+| `NX-AUTH` | Argon2id ✅ · lockout ✅ (ya existía) · endurecido + auditoría ✅ en la rama. **Falta:** activar el flag; que el lockout por IP deje de alimentarse de `X-Forwarded-For` (`dependencies.py:72`) — hoy es evadible **y abusable**: falsificando la IP de un tercero se le bloquea el panel 15 min; MFA opcional | Credenciales malas → 401 uniforme; login admin auditado |
+| `NX-DEV` | Base hecha (flag `DEVICE_SECRET_ENFORCE`). _Falta:_ que el web player/STB guarden y presenten el secreto (otro repo) + rate-limit de re-binding + handshake HMAC opcional | Device sin secret válido no obtiene token |
+| `NX-AUDIT` | Inmutabilidad ✅ (trigger, Alembic 007). Falta particionado + retención | Consulta filtrable; no se puede alterar |
 | `NX-PARENTAL` | Control parental **PIN server-side** (`channels.censored`) | Canal adulto sin PIN → 403 |
+
+**Residuales de login conocidos y aceptados** (preexistentes, decisión del dueño):
+enumeración por *timing* (~50–100 ms: `if not user or not verify_password(...)` cortocircuita) y
+`"Account is disabled"`, que confirma que la cuenta existe **y** que la contraseña era correcta.
 
 ---
 
 ## 🟢 P3 — Fase 2 (crecimiento de producto)
 
 - `NX-EPG` — **EPG real** (hoy es mock en `catalog.py`): ingest async + cron, sin duplicados, sin XXE.
-- `NX-RBAC` — RBAC admin + **resellers** (aislamiento por tenant).
+- `NX-RBAC` — RBAC admin + **resellers** (aislamiento por tenant; el scoping ya está en la rama).
+  ⚠️ **Antes de activar cuentas de reseller:** los suscriptores con `created_by` nulo son
+  invisibles para cualquier reseller — solo los ve el admin. Asignarles dueño con un UPDATE.
 - `NX-NOTIF` — comandos/eventos push al device (entregados en el heartbeat, con ack).
-- **Normalizar entitlements a paquetes** (`packages`/`plan_packages`/`package_contents`). _Divergencia consciente:_ hoy se resolvió con `plan_channels` (005), más simple. Solo si el producto lo exige.
+- **Normalizar entitlements a paquetes** (`packages`/`plan_packages`/`package_contents`).
+  _Divergencia consciente:_ hoy se resolvió con `plan_channels` (005+008), más simple.
 
 ---
 
 ## 🟢 P4 — Fase 3 (escala y monetización)
 
-`NX-VOD` (VOD/series) · `NX-CATCHUP` (timeshift/DVR) · `NX-BILL` (billing idempotente) · `NX-ASTRA` (adapter Astra) · `NX-XC` (XtreamCompat read-only) · `NX-CDN` (multi-región/CDN) · `NX-IAC` (IaC + DR).
+`NX-VOD` (VOD/series) · `NX-CATCHUP` (timeshift/DVR) · `NX-BILL` (billing idempotente) ·
+`NX-ASTRA` (adapter Astra) · `NX-XC` (XtreamCompat read-only) · `NX-CDN` (multi-región/CDN) ·
+`NX-IAC` (IaC + DR).
 
-**`NX-APPS` (Android TV / Mobile / iOS) está BLOQUEADO** por restricción del proyecto: no se empieza hasta que **playback, sesiones y observabilidad** estén estables (⇒ requiere P0 + P1 + P2.1 cerrados).
+**Decisión de negocio (2026-07-31):** La Red **no** vende hoy servicios add-on por cliente
+(VOD/Timeshift/VIP); se contemplan a futuro. No se construye el modelo ni la migración. El
+entitlement se resuelve por plan, así que añadir una capa por-cliente después es aditivo.
+**Sin decidir:** ¿límite de dispositivos por cliente además de por plan? (implica migración de BD).
+
+**`NX-APPS` (Android TV / Mobile / iOS) está BLOQUEADO** por restricción del proyecto: no se
+empieza hasta que **playback, sesiones y observabilidad** estén estables (⇒ P0 + P1 + P2.1 cerrados).
 
 ---
 
 ## Orden recomendado (grafo de dependencias)
 
 ```
-P0.3 versionado (PR #9 + push)          ← barato, hazlo ya
-P0.1 IP-binding soft ──► strict          ← cierra M1
-P0.2 hardening del grant                 ← cierra M1 (código + tests)
-P0.4 alerta co-main ──────┐
-                          ├──► P2.2 Flussonic registry + failover
-P1.3 STAGING real ────────┤              (desbloquea probar flags sin riesgo)
-                          └──► P1.1 stress + P1.2 Lua concurrencia
-                                   │
-                                   └──► P2.1 observabilidad extendida
-                                              │
-                                              └──► P2b seguridad MVP (NX-DEV/AUTH/AUDIT)
-                                                        │
-                                                        └──► P3 (EPG, RBAC) ──► P4 (VOD, billing, APPS)
+P0.6 desplegar la rama (+ Alembic 008)   ← lo más valioso parado hoy
+      │
+      ├──► P0.5 activar el probe de nodos ──► P2.1 alertas ──► P2.2 failover
+      ├──► P0.1 IP-binding soft ──► strict     ← cierra M1
+      └──► P0.2 definir el tope del grant      ← cierra M1
+
+P0.7 sonda tc-mia (5 min, solo lectura)  ← barato, hazlo ya
+P0.8 decidir la fuga de source_url       ← barato, es una decisión
+
+P1.4 paridad migración↔ORM ──┐
+P1.5 tests en el contenedor ─┴──► P1.1 stress + P1.3 staging
+                                        └──► P2b seguridad (NX-NODE, NX-AUTH, NX-DEV)
+                                                  └──► P3 (EPG, RBAC) ──► P4 (VOD, billing, APPS)
 ```
 
 **Regla dura:** nada de apps nativas hasta cerrar P0+P1+P2.1.
@@ -156,9 +234,12 @@ P1.3 STAGING real ────────┤              (desbloquea probar fl
 
 | Riesgo | Estado / mitigación |
 |---|---|
-| Revocación no corta streams en curso (grant auto-renovable) | **Resuelto en código** (PR #11, `STREAM_GRANT_MAX_LIFETIME_SECONDS`); falta definir/activar el tope en prod |
+| `plan_channels` da 500 en prod al desplegar | **Resuelto en la rama** (Alembic 008); el riesgo se cierra al aplicarla junto con P0.6 |
+| Divergencia ORM↔migraciones invisible para los tests | **Abierto** → P1.4. Ya produjo un bug bloqueante |
+| Revocación no corta streams en curso (grant auto-renovable) | Código listo; **falta definir el tope** → P0.2 |
 | `strict` IP-binding rompe clientes móviles | Mitigado: escalonar `off → soft → strict` con observación (P0.1) |
-| El fix real de Nginx solo vive en el servidor | Mitigado: en **PR #9** (abierto); riesgo se cierra al mergear |
+| Canales de Miami invisibles en una marca | **Probable** → P0.7 lo confirma con una sonda |
+| Credenciales del proveedor visibles en devtools del panel | **Abierto** → P0.8 |
 | No hay staging → los flags se prueban en producción | **Abierto** → P1.3 |
 | Fuentes IPTV externas caídas (co-main) | Conocido → alertas + failover (P0.4 / P2.2) |
-| Carrera en el ZSET puede exceder `max_connections` | **Abierto** → P1.2 (Lua) |
+| Producción NO es un repo git; el nginx vivo puede divergir del versionado | Comparar SIEMPRE antes de tocar (ya evitó borrar la ruta de tc-main) |
