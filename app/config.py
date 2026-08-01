@@ -31,6 +31,41 @@ class Settings(BaseSettings):
     redis_password: str = ""
     redis_db: int = 0
 
+    # ── Redis connection pool (stress F2) ────────────────────────────────────
+    # The client used to be built with no pool bounds at all, which means the
+    # ceiling was "whatever redis-py's default happens to be" — and that is NOT
+    # a constant: requirements.txt pins `redis[asyncio]>=5.2.0`, 7.4.0 defaults
+    # to 2**31 (effectively unbounded) while 8.1.0 defaults to 100. The deployed
+    # image landed on 8.1.0, so the API silently acquired a hard 100-op ceiling
+    # that nobody chose. Worse, the plain pool does not queue: with no free
+    # connection it raises MaxConnectionsError immediately, so the request 500s.
+    # Measured at 8.1.0: errors == concurrency - 100, exactly (150 → 50 errors,
+    # 300 → 200, 1000 → 900). Cruise traffic never gets there; the RECONNECT
+    # STAMPEDE after a Redis or network blip does, which is precisely the moment
+    # the API must not be handing out 500s.
+    #
+    # 200 per worker: every Redis op here is sub-millisecond (measured ~3150
+    # open_connection/s), so a connection is held for microseconds and 200 is
+    # already far more parallelism than one uvicorn worker can drive; it exists
+    # to absorb the stampede burst, not steady state. Cost is bounded and cheap
+    # — even 8 workers × 200 = 1600 client connections sits well inside Redis's
+    # default `maxclients` 10000.
+    redis_max_connections: int = 200
+
+    # How long an operation waits for a free connection before failing.
+    #   > 0  (default) → BlockingConnectionPool: the op WAITS. Above the ceiling
+    #                    requests queue for a few milliseconds instead of 500ing,
+    #                    which is the whole point — a burst is a latency problem,
+    #                    not an error.
+    #   <= 0           → the plain non-blocking pool: fail fast with
+    #                    MaxConnectionsError (previous behavior, kept as an
+    #                    escape hatch).
+    # Bounded rather than infinite on purpose: an unbounded wait converts pool
+    # exhaustion into an unbounded queue, so a genuinely stuck Redis would hang
+    # every worker forever instead of surfacing. 5s is longer than any healthy
+    # op by three orders of magnitude and shorter than a client's own timeout.
+    redis_pool_timeout_seconds: float = 5.0
+
     # Security
     max_login_attempts: int = 5
     login_lockout_minutes: int = 15
@@ -84,6 +119,33 @@ class Settings(BaseSettings):
     signed_url_enforce: bool = False     # True → playback_url carries ?token= and /stream/* requires it
     device_secret_enforce: bool = False  # True → playback requires an activated device (secret verified); False → legacy auto-register
     catalog_entitlement_filter: bool = False  # True → /client/catalog/channels lists only the plan's channels; False → full active catalog
+
+    # ── Parental control (NX-PARENTAL) ───────────────────────────────────────
+    # Server-side PIN gate for channels marked `channels.censored`. Enforcement
+    # lives at the two routes that MINT a playback token
+    # (POST /api/client/playback/authorize and its reissue sibling), because a
+    # PIN checked by the app is not a control: the app is code the household
+    # runs, and the token is minted by an HTTP call anyone can replay by hand.
+    #
+    # Default False = today byte for byte: the catalog payload carries no
+    # `censored` key and playback never consults the gate. The PIN management
+    # endpoints (/api/client/parental/*) work in BOTH states on purpose — that
+    # is what lets an operator have subscribers set a PIN *before* flipping the
+    # flag, instead of flipping it and locking every household out of the adult
+    # tier at once.
+    parental_control_enforce: bool = False
+    # How long one successful unlock lasts, per subscriber AND device. The TTL
+    # SLIDES on each use, so a session on an adult channel does not die
+    # mid-programme (the player reissues a token every ~45s) while leaving that
+    # channel for longer than the window re-arms the prompt.
+    parental_pin_unlock_ttl_seconds: int = 900
+    # The PIN is 4-6 digits, i.e. a 10^4..10^6 keyspace: the Argon2id hash is
+    # what protects a stolen DUMP, but only these three knobs protect the PIN
+    # ONLINE, which is the attack that actually happens. Same shape and same
+    # defaults as the hardened admin lockout above.
+    parental_pin_max_attempts: int = 5               # consecutive failures that arm the block
+    parental_pin_attempt_window_seconds: int = 900   # counted from the FIRST failure
+    parental_pin_lockout_seconds: int = 900          # how long PIN entry stays blocked
 
     # STB surface hardening. The /api/stb/* device endpoints historically took the
     # caller's identity (subscriber_id / device_id) from the REQUEST BODY with no
@@ -253,6 +315,110 @@ class Settings(BaseSettings):
     # node from the catalog.
     node_probe_streams: str = ""
 
+    # ── Node failover (P2.2 / NX-FLU) ─────────────────────────────────────────
+    # `co-main` is down and its 4 channels have no service. Serving them from a
+    # node that also carries those streams needs two things stated explicitly:
+    #
+    #  1. WHICH node. `channels.flussonic_node` is one scalar per channel, and
+    #     the only authority on what a node actually serves is the node itself —
+    #     which the `api` container cannot reach (the whole reason
+    #     NODE_PROBE_MODE exists). So mirrors are DECLARED here, never
+    #     discovered: FLUSSONIC_STREAM_MIRRORS is a CSV of
+    #     "stream_key:node[|node…]" in preference order. Empty (default) = no
+    #     stream has a mirror = failover can never fire.
+    #  2. WHEN to switch. Health comes from the alert the existing monitor keeps
+    #     open while a node is down (app/main.py::_stream_health_monitor →
+    #     AlertService), so failover and /admin/alerts always agree.
+    #
+    #   off    (default) — the channel's node is used, no health read, no Redis
+    #                      call. Today's behavior byte for byte.
+    #   mirror           — a node that is down is swapped for the first HEALTHY
+    #                      declared mirror of that stream; with no healthy
+    #                      candidate the original node is kept, so this mode can
+    #                      never be worse than `off`.
+    #   strict           — same, but with no healthy candidate it answers
+    #                      503 NODE_UNAVAILABLE rather than a URL to a dead node.
+    #
+    # Enable `strict` only with NODE_PROBE_MODE=hls_signed: the default `origin`
+    # probe cannot route to any origin and reports every node down, which under
+    # strict would refuse every channel.
+    #
+    # The resolved node feeds BOTH the playback token's `node` claim and the
+    # /stream/<node>/ path of the URL, so a failover always mints a NEW token
+    # bound to the NEW node — reusing the old one is exactly the cross-node reuse
+    # PLAYBACK_NODE_BINDING_ENFORCE closes.
+    flussonic_failover_mode: str = "off"     # off | mirror | strict
+    flussonic_stream_mirrors: str = ""       # CSV "stream_key:node[|node…]"
+
+    # ── Programme guide / EPG (NX-EPG) ───────────────────────────────────────
+    # GET /api/client/catalog/channels/{key}/epg historically served a hard-coded
+    # dict of three invented programmes covering three of the 41 channels, and
+    # every real client rendered that as if it were the schedule.
+    #
+    # EPG_ENABLED is the read-side switch. False (default) = today byte for byte,
+    # mock included, so deploying this changes nothing. True = the endpoint serves
+    # what was actually ingested into `epg_programmes`, and a channel with no data
+    # gets an EMPTY LIST — the honest answer. Inventing programmes is what this
+    # feature exists to stop, so the mock is never a fallback for the real path.
+    epg_enabled: bool = False
+
+    # EPG_INGEST_ENABLED is the write-side switch, separate on purpose: an
+    # operator must be able to ingest and inspect the guide BEFORE exposing it to
+    # clients, and to stop fetching without hiding a grid that is already loaded.
+    #
+    # The background loop additionally refuses to start unless EPG_SOURCE_URL is
+    # set. An unconfigured deployment therefore never reaches out to the network
+    # on a timer — enabling the feature is a deliberate two-part act, not a
+    # side effect of upgrading.
+    epg_ingest_enabled: bool = False
+
+    # The XMLTV source: an http(s) URL, or a path to a local file for operators
+    # who receive the guide by other means (and for reproducing a bad ingest
+    # offline). Parsed by app/services/xmltv_parser.py, which refuses external
+    # entities, entity declarations and internal DTD subsets — read its module
+    # docstring before pointing this at anything.
+    epg_source_url: str = ""
+
+    # 6h. An XMLTV guide is published a few times a day at most, so polling it
+    # more often costs the provider bandwidth and buys nothing; the ingest is
+    # idempotent, so a missed cycle self-heals on the next one.
+    epg_ingest_interval_seconds: int = 21600
+    epg_fetch_timeout_seconds: float = 30.0
+
+    # Programmes whose end time is older than this are deleted after each ingest.
+    # A guide refreshed every 6h would otherwise grow without bound; 3 days keeps
+    # enough history for "what was on last night" while bounding the table.
+    epg_retention_days: int = 3
+
+    # Default width of the window the EPG endpoint answers with when the caller
+    # does not ask for one. 24h is one screen of "what's on today" for a TV grid.
+    epg_default_window_hours: int = 24
+    epg_max_window_hours: int = 168  # 7 days — refuse to dump the whole table
+
+    @property
+    def flussonic_stream_mirror_map(self) -> dict[str, list[str]]:
+        """FLUSSONIC_STREAM_MIRRORS as {stream_key → [node_id, …]}.
+
+        Same CSV discipline as NODE_PROBE_STREAMS: parsed here, never derived
+        from request data. Order is the operator's preference and is preserved;
+        duplicate and malformed entries are dropped rather than raised, so a typo
+        degrades the failover instead of taking the API down at import time.
+        """
+        out: dict[str, list[str]] = {}
+        for raw in self.flussonic_stream_mirrors.split(","):
+            stream, _, nodes = raw.partition(":")
+            stream = stream.strip()
+            if not stream:
+                continue
+            ordered: list[str] = []
+            for node in nodes.split("|"):
+                node = node.strip()
+                if node and node not in ordered:
+                    ordered.append(node)
+            if ordered:
+                out.setdefault(stream, ordered)
+        return out
+
     @property
     def node_probe_stream_map(self) -> dict[str, str]:
         """NODE_PROBE_STREAMS as {node_id → stream_key}.
@@ -267,6 +433,19 @@ class Settings(BaseSettings):
             if node and stream:
                 out.setdefault(node, stream)
         return out
+
+    # ── Prometheus scrape auth (P2.1) ─────────────────────────────────────────
+    # /api/admin/metrics/prometheus exposes subscriber counts, channel counts and
+    # usage patterns — not something to leave unauthenticated. Prometheus scrapes
+    # on a timer with no login flow, so the admin JWT (short-lived, requires an
+    # interactive login) is the wrong fit; this is a separate, static, long-lived
+    # bearer credential meant for exactly one caller (the scraper), checked with a
+    # constant-time comparison. Empty (default) = the endpoint stays disabled
+    # (503) rather than silently open — a deployment that never sets this env var
+    # gets no scrape endpoint at all, instead of an unauthenticated one.
+    # Defense in depth beyond this token is expected at the network layer (only
+    # the Prometheus host should be able to reach this path at all).
+    metrics_prometheus_token: str = ""
 
     @property
     def playback_allowed_nodes(self) -> set[str]:
