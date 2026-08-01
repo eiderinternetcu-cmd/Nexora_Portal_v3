@@ -45,6 +45,12 @@ urgente es que los canales de Miami no se ven en esa marca. Análisis: `docs/ANA
 No se pintan, pero viajan en la respuesta y son visibles en devtools; `source_url` puede llevar
 credenciales del proveedor. ¿Enmascarar siempre, solo admin, o endpoint de "revelar" con auditoría?
 
+### 3b. Repetir los cinco escenarios end-to-end del stress test
+Ya no están bloqueados: las cabezas de Alembic están linealizadas (migración 014) y la base
+local está en `014 (head)`. Los scripts están en `scripts/stress/`; el informe, en
+`docs/STRESS_TESTS_PLAYBACK.md`. Y mete `conn_service_probe.py` (~15 s, sin Postgres ni HTTP)
+en la verificación previa a cada despliegue: ya atrapó dos fallos serios.
+
 ### 4. Flags que quedan por activar (uno por vez, con observación y rollback)
 - `PLAYBACK_IP_BINDING_MODE=soft` → `strict` (P0.1) — último ítem vivo de M1.
 - `NODE_PROBE_MODE=hls_signed` (P0.5) — antes, confirmar que `NODE_PROBE_EDGE_BASE_URL` resuelve

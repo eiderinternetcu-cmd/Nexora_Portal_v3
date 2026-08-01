@@ -35,6 +35,10 @@ _Actualizado: 2026-07-31 (sesión de cierre de backlog local — ver `docs/INFOR
 | **P1.6 — caché de segmentos en el edge** (1 tirada al origen por N espectadores) | 🟡 en la rama, **sin desplegar** |
 | **NX-NODE / NX-AUTH — claim `node` cerrado, IP de confianza** (flags, defaults legacy) | 🟡 en la rama, **sin activar** |
 | **Familia de 500 por columnas acotadas** (`audit_logs`, `sessions`, `devices`, `users`) | 🟡 en la rama |
+| **El límite de conexiones simultáneas volvió a existir** + pool de Redis acotado | 🟡 en la rama |
+| **Alembic 010-014** (`plans.name`, particionado de auditoría, control parental, EPG, merge) | 🟡 en la rama, **sin aplicar en prod** |
+| **P0.9 guardia de nodos + `nginx_config_diff.py`** · **P2.1 Prometheus** · **P2.2 registry y failover** | 🟡 en la rama |
+| **P1.1 stress tests ejecutados** (scripts reutilizables + informe) | ✅ ejecutados en local |
 
 **Prod: Alembic 007. M1 ~95% y M2 ~90% desplegados.**
 **% actual:** MVP streaming seguro+operable **~90%** · Visión completa OTT **~44%**.
@@ -112,18 +116,22 @@ que ya existía en git fue pisado por una copia rancia.
 
 Quedan tres derivadas, abajo en **P0.9**.
 
-### P0.9 · Derivadas de `tc-mia` — la clase de fallo sigue abierta
-1. **No hay guardia genérica**: falta un `location ^~ /stream/` que devuelva 403 para nodos no
-   declarados. Hoy no hay síntoma, pero **el próximo nodo que se olvide repite el 200 mudo**.
-   La reparación del 27-jul arregló *el caso*, no *la clase*. Bloque exacto en
-   `docs/ANALISIS_BYPASS_TCMIA.md` §8.5.
-2. **Arreglar el procedimiento de despliegue** — comparar checksum/diff repo↔vivo antes de
-   copiar. Es la causa raíz.
-3. **Retirar el monolito de 939 líneas y los `patch_nginx_*.py`**: no están desplegados, son
-   material muerto, y ya indujeron un diagnóstico equivocado una vez.
-4. **Versionar el `nginx.conf` principal.** El `proxy_pass` de `/__stream_auth` lleva variables,
-   lo que obliga a nginx a exigir un `resolver`; ese `resolver` vive en el `nginx.conf`
-   principal, que **no está en el repo**. Si alguien recrea el contenedor, el gate no arranca.
+### P0.9 · ✅ CERRADO (2026-07-31) — derivadas de `tc-mia`
+1. ✅ **Guardia genérica**: un `/stream/` no declarado devuelve **403**. Es 403 y no 401 a
+   propósito — un 401 sería indistinguible de `@stream_denied` y la verificación del runbook
+   ("sin token → 401 en los cuatro nodos") daría verde con un nodo borrado de la config.
+2. ✅ **`scripts/nginx_config_diff.py`** ataca la causa raíz: compara la config versionada
+   contra la viva antes de copiar. Distingue `DIFIERE`, `SOLO EN VIVO` y **`FALTA`** — el
+   incidente en forma de fichero. Procedimiento en el runbook §10.
+3. ✅ **Material muerto retirado**: el monolito (que había crecido a 1379 líneas) y los
+   `patch_nginx_*.py`. Queda **una sola** copia operativa del `auth_request` en `deploy/`.
+4. ⚠️ **Premisa refutada, medida**: no hace falta ningún `resolver`. nginx solo lo exige cuando
+   la parte de **host** de `proxy_pass` es variable, y aquí es literal — las variables están en
+   la query string. Cero directivas `resolver` en producción y el gate funcionando. Versionar
+   el `nginx.conf` principal sigue mereciendo la pena, pero **no** es un riesgo de arranque.
+
+**Queda abierto de aquí:** el vhost de **staging** (`deploy/nginx/staging/`) es autónomo, no
+incluye los snippets y **sigue sin guardia** — un nodo no declarado allí devuelve HTML del SPA.
 
 ### P0.7-histórico · El enunciado original (conservado)
 `tc-mia` devolvió 200 a un stream sin token; los otros 3 nodos dan 401. El análisis completo
@@ -208,7 +216,30 @@ se cachea es la respuesta del upstream, no la autorización. No se pierde contro
 **AC:** N espectadores concurrentes del mismo canal → 1 sola conexión al origen; un token
 inválido sigue dando 401 con el segmento en caché.
 
-### P1.1 · Stress tests de playback (Fase 4 · Bloque 3 — nunca ejecutado)
+### P1.1 · ✅ EJECUTADOS (2026-07-31) — y encontraron lo que buscaban
+Corridos por primera vez. Scripts reutilizables en `scripts/stress/`, informe en
+`docs/STRESS_TESTS_PLAYBACK.md`.
+
+**Hallazgo mayor, ya corregido: el límite de conexiones simultáneas era evitable entero.**
+`extend_connection` (el heartbeat) hacía un `ZADD` pelado que **creaba** el hueco sin comprobar
+nada, y el Lua solo evalúa el límite cuando el miembro no existe. Encadenados: **10 conexiones
+en un plan de 3**. El techo real era `max_devices`, no `max_connections` — es decir, la palanca
+comercial que sostiene la política de 2/4 conexiones **nunca estuvo conectada**.
+
+**La sospecha del roadmap era falsa**: la carrera en el ZSET **no existe**. 5 rondas de 12
+aperturas concurrentes conceden exactamente 3, siempre; 50 suscriptores × 20 concurrentes,
+ninguno se pasa. El Lua de apertura es correcto.
+
+También: el pool de Redis reventaba en 100 en vez de encolar (900 errores con 1000 en vuelo →
+ahora 0 y 157 ms), y **`/health` da 500 en la primera petición tras reiniciar Redis** — importa
+porque un healthcheck con `retries: 1` reiniciaría la API justo cuando Redis se recupera.
+
+**Pendiente:** los **cinco escenarios end-to-end por HTTP** no llegaron a correr (las cabezas
+múltiples de Alembic, ya linealizadas, dejaron el login sin base consistente). Repetirlos ahora
+es barato. Tampoco se corrió el soak de 3–6 h. `conn_service_probe.py` (~15 s, sin Postgres ni
+HTTP) es el candidato natural para la verificación previa a cada despliegue.
+
+### P1.1-histórico · El plan original (conservado)
 Con métricas encendidas (`/api/admin/metrics`, `/api/admin/sessions/live`):
 - Zapping rápido (5 canales en 30 s) → sesiones zombie y falsos 409.
 - Playback continuo 3–6 h → memory leaks en browser, limpieza del ZSET.
@@ -228,16 +259,27 @@ escrito pero **sin ejecutar**.
 
 ## 🟡 P2 — Observabilidad y resiliencia
 
-### P2.1 · Observabilidad extendida (`NX-MON`) — mayormente entregada en M2
-Entregado: métricas de playback, auditoría inmutable, correlation-id.
-Pendiente: alertas de stream/nodo caído (depende de **P0.5**), `/api/admin/streams` con
-`is_active` (DB) vs `alive` (Flussonic), métricas Prometheus/OTel.
+### P2.1 · ✅ CERRADO (2026-07-31) — observabilidad extendida (`NX-MON`)
+Métricas en formato Prometheus (generadas a mano, sin dependencia nueva), con token de scrape
+propio que **falla cerrado**: sin token configurado el endpoint da 401, nunca queda abierto.
+Etiquetas acotadas y sin identificar a nadie (`channel_key`, `node_id`, `reason`).
+`/api/admin/streams` distingue `is_active` (DB) de `alive` (Flussonic) sin sondear 41 canales
+por scrape. **Pendiente:** solo activar las alertas de nodo, que dependen de **P0.5**.
 
-### P2.2 · Multi-Flussonic Registry + failover (`NX-FLU`)
-`get_flussonic_node_client()` sigue siendo un stub y el `.env` lista los nodos a mano.
-→ `app/integrations/flussonic_registry.py` formal (`node_id`, `base_url`, `region`, `priority`,
-`is_healthy`) + health check periódico + **failover de nodo**. Sin geo-routing todavía.
-**AC:** failover probado (relevante ya, por co-main).
+### P2.2 · ✅ CERRADO (2026-07-31) — registry + failover (`NX-FLU`)
+`app/integrations/flussonic_registry.py` formal; el `if/elif` del cliente y la lista propia de
+`node_health` **desaparecen** (borra duplicación, no añade una tercera copia). La salud sale de
+la alerta que el monitor ya mantiene, así que el failover ve el mismo estado que `/admin/alerts`.
+
+**El failover ocurre al acuñar el token, y es una restricción de seguridad, no una preferencia:**
+resolverlo más abajo cambiaría solo la URL y el cliente iría al nodo B con un token cuyo claim
+dice A — con el binding de nodo eso es 403, sin él un 200, o sea la reutilización entre nodos
+que `NX-NODE` acaba de cerrar.
+
+"Qué nodo tiene qué stream" **no se puede saber** (el escalar `channels.flussonic_node`, y el
+backend no alcanza los orígenes), así que mapa explícito en configuración, por stream. Vacío por
+defecto. ⚠️ `strict` solo con `NODE_PROBE_MODE=hls_signed`: con el probe `origin` el backend no
+alcanza nada, declararía todos los nodos caídos y rechazaría todos los canales.
 
 ---
 
@@ -247,7 +289,9 @@ Pendiente: alertas de stream/nodo caído (depende de **P0.5**), `/api/admin/stre
 |---|---|---|
 | `NX-NODE` | ✅ **resuelto en la rama** (flag `PLAYBACK_NODE_BINDING_ENFORCE` + `PLAYBACK_NODE_ALLOWLIST`, defaults legacy). La arqueología mostró que la tolerancia fue *load-bearing* cuando se escribió —había dos emisores legítimos de tokens sin nodo, ya corregidos antes en esta rama— así que cerrarlo debería ser un no-op. **Falta:** activar el flag | Token sin claim `node` → 403, no 200 |
 | `NX-AUTH` | ✅ **resuelto en la rama** (flags `CLIENT_IP_SOURCE` + `TRUSTED_PROXY_CIDRS`). Había **cinco** copias del resolutor roto, no una: arreglar solo `dependencies.py` habría dejado el rate limiter abierto. En modo `edge` las cabeceras solo se creen si el par es de confianza, y se lee el **último** salto de XFF, no el primero. **Falta:** activar los flags; MFA opcional | Credenciales malas → 401 uniforme; login admin auditado |
-| `NX-PARITY` | **NUEVO, del test de paridad.** Dos divergencias ORM↔migración sin arreglar: **`plans.name`** repite el patrón índice-vs-constraint de la 005 (será un 500 el día que alguien haga `ON CONFLICT ON CONSTRAINT` sobre ese campo), y falta el índice **`ix_subscriptions_starts_at`** en producción — lo que significa que un `EXPLAIN` medido contra una base de test **no describe producción** | El test de paridad pasa sin entradas en `KNOWN_DIVERGENCES` |
+| `NX-PARITY` | ✅ **cerrado** (Alembic 010). `KNOWN_DIVERGENCES` está **vacío** | El test de paridad pasa sin entradas |
+| `NX-AUDIT` | ✅ **cerrado** (Alembic 011): particionado mensual + retención **apagada por defecto** y en simulación por defecto, 84 meses de guarda. La inmutabilidad queda **más fuerte** — un trigger clonado no se puede quitar de una sola partición. Partición `DEFAULT` para que un mes sin crear no tumbe el login | UPDATE/DELETE rechazados en cualquier partición |
+| `NX-PARENTAL` | ✅ **cerrado** (Alembic 012), flag `PARENTAL_CONTROL_ENFORCE` off. El límite de intentos —no el hash— es lo que protege un PIN de 4-6 dígitos, contado **por suscriptor**. Se bloquea también la **reemisión** de token. **Limitación declarada:** la ruta de EPG no está protegida | Canal censurado sin PIN → 403 |
 | `NX-DEV` | Base hecha (flag `DEVICE_SECRET_ENFORCE`). _Falta:_ que el web player/STB guarden y presenten el secreto (otro repo) + rate-limit de re-binding + handshake HMAC opcional | Device sin secret válido no obtiene token |
 | `NX-AUDIT` | Inmutabilidad ✅ (trigger, Alembic 007). Falta particionado + retención | Consulta filtrable; no se puede alterar |
 | `NX-PARENTAL` | Control parental **PIN server-side** (`channels.censored`) | Canal adulto sin PIN → 403 |
@@ -260,7 +304,13 @@ enumeración por *timing* (~50–100 ms: `if not user or not verify_password(...
 
 ## 🟢 P3 — Fase 2 (crecimiento de producto)
 
-- `NX-EPG` — **EPG real** (hoy es mock en `catalog.py`): ingest async + cron, sin duplicados, sin XXE.
+- `NX-EPG` — ✅ **cerrado** (Alembic 013), flag `EPG_ENABLED` off. Ingesta XMLTV asíncrona; el
+  parser conduce expat directamente (sin dependencia nueva) y **rechaza las construcciones** en
+  vez de detectar payloads: entidad externa, DTD externa y expansión exponencial. Sus tests
+  **demuestran primero que el ataque es real en este intérprete** y solo entonces que el parser
+  lo rechaza — si no, serían tautologías. Unicidad por **constraint** (la lección de la 005, la
+  008 y la 010) y `TEXT` en vez de `VARCHAR(n)` (la del 500 del login). El mapeo usa
+  `channels.epg_id`, que existía desde la 003 y **no lo leía ningún código**.
 - `NX-RBAC` — RBAC admin + **resellers** (aislamiento por tenant; el scoping ya está en la rama).
   ⚠️ **Antes de activar cuentas de reseller:** los suscriptores con `created_by` nulo son
   invisibles para cualquier reseller — solo los ve el admin. Asignarles dueño con un UPDATE.
@@ -334,6 +384,10 @@ P1.5 tests en el contenedor ─┴──► P1.1 stress + P1.3 staging
 | Un despliegue puede pisar un arreglo que ya está en git | **Abierto** → P0.9.2. Ya pasó: causó 12,5 h sin canales de Miami |
 | El gate no arranca si se recrea el contenedor de nginx | **Abierto** → P0.9.4. El `resolver` que exige `/__stream_auth` vive en un fichero no versionado |
 | Columnas acotadas escritas sin recortar (500 en login y playback) | **Resuelto en la rama**; `_assert_fits()` impide que la divergencia vuelva en silencio |
+| El límite de conexiones por plan no se aplicaba (10 en un plan de 3) | **Resuelto en la rama**. Era la palanca comercial entera: sin ella, un plan se reparte entre hogares |
+| Una dependencia sin fijar cambió el comportamiento de producción | **Abierto**. El techo de 100 del pool de Redis llegó con un bump de versión (`redis[asyncio]>=5.2.0` sin fijar). Ahora está acotado por configuración, pero el patrón sigue: conviene fijar versiones |
+| El vhost de staging no tiene guardia de nodos | **Abierto** → repite el 200 mudo de `tc-mia` si se olvida un nodo allí |
+| `/health` da 500 en la primera petición tras reiniciar Redis | **Abierto**. Con `retries: 1` en el healthcheck, reiniciaría la API justo cuando Redis se recupera |
 | Revocación no corta streams en curso (grant auto-renovable) | Código listo; **falta definir el tope** → P0.2 |
 | `strict` IP-binding rompe clientes móviles | Mitigado: escalonar `off → soft → strict` con observación (P0.1) |
 | Canales de Miami invisibles en una marca | **Probable** → P0.7 lo confirma con una sonda |
