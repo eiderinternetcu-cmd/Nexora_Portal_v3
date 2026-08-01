@@ -185,5 +185,13 @@ Con producción ya parcheada, estas quedan disponibles:
   ```
 
   Los valores deben ser exactamente los que tienen `location` en
-  `deploy/nginx/nexoraplay.conf`. **`ec-quito` no tiene `location` en el conf de
-  producción** — si aparece en esa consulta, revísalo antes de desplegar.
+  `deploy/nginx/snippets/stream-gate.conf` (la ruta antigua
+  `deploy/nginx/nexoraplay.conf` era un artefacto generado; se retiró en P0.9.3).
+  Hoy son cuatro: `ec-main`, `co-main`, `tc-main`, `tc-mia`. **`ec-quito` no tiene
+  `location`** — si aparece en esa consulta, revísalo antes de desplegar.
+
+  > Desde P0.9.1 este desajuste **ya no es silencioso**: un nodo con canales en la
+  > base de datos pero sin `location` devuelve **403** (cinturón `location ^~
+  > /stream/`), no el HTML del SPA con 200. Sigue siendo un fallo de servicio —los
+  > canales de ese nodo no se ven— pero se detecta en la primera petición en vez
+  > de a las 12 horas. Ver `RUNBOOK_EDGE_MULTIDOMINIO.md` § 10.3.

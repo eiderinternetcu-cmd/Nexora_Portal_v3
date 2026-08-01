@@ -30,6 +30,23 @@ Consecuencia que hay que interiorizar antes de tocar nada:
 > significa "producción está al día". No existe ningún comando en tu máquina que
 > te diga qué corre allí.
 
+> ### ⚠ ACTUALIZACIÓN MEDIDA (2026-07-31): esta tabla ya NO describe producción
+>
+> **[VERIF-PROD]** El volcado de `nginx -T` del servidor
+> (`docs/ANALISIS_BYPASS_TCMIA.md` § 8.2) muestra ficheros **separados** —
+> `conf.d/00-default-server.conf`, `conf.d/laredtelco.conf`,
+> `conf.d/nexoraplay.conf` (78 líneas) y `snippets/stream-gate.conf`— cargados vía
+> `include /etc/nginx/conf.d/*.conf`. Si el montaje fuese el archivo suelto,
+> `nginx -T` mostraría **un** fichero (`conf.d/default.conf`). Es decir: **el
+> camino B ya está aplicado y es el que corre.** El camino A de la sección 4 es
+> historia; se conserva porque documenta el rollback de esa época.
+>
+> La tabla de abajo se deja **sin retocar** como registro de lo que era cierto
+> hasta el 27-jul. **Confírmalo tú mismo antes de tocar nada** con el `docker
+> inspect` de aquí debajo y, sobre todo, con la comparación de la **sección 10**:
+> no vuelvas a fiarte de una tabla escrita en otra sesión — ese es exactamente el
+> error que costó 12,5 h de canales caídos.
+
 Esto no es teórico — ya hay una deriva viva, y es justo la que decide cómo se
 carga la configuración:
 
@@ -235,9 +252,21 @@ No hace falta tocar el servidor para saber si la configuración parsea. Anexo A.
 
 ## 4. Cargar la configuración
 
-Dos caminos. **El A es el que aplica hoy.** El B es el destino.
+Dos caminos. ~~**El A es el que aplica hoy.**~~ **[VERIF-PROD 2026-07-31] Hoy
+aplica el B**: producción ya monta los directorios (ver el aviso de la sección 0).
+El A se conserva porque documenta el rollback de esa época y porque sigue siendo
+la vía si alguna vez hay que volver al montaje de archivo suelto.
 
-### 4A · Archivo único generado — APLICA HOY
+### 4A · Archivo único generado — YA NO APLICA (se conserva por el rollback)
+
+> **⚠ El archivo generado NO se versiona.** Durante un tiempo el resultado de
+> este procedimiento se commiteó como `deploy/nginx/nexoraplay.conf` (939 líneas,
+> luego 1379). Eso creó una **segunda copia del gate** en el repo, desincronizada
+> de `snippets/stream-gate.conf`, y esa copia indujo un diagnóstico equivocado
+> del incidente de `tc-mia` (`docs/ANALISIS_BYPASS_TCMIA.md` § 8.4.4: se modeló el
+> despliegue sobre el monolito cuando lo desplegado era el snippet compartido).
+> El archivo se **retiró del repositorio** en P0.9.3. Si vuelves a generarlo,
+> déjalo en `/tmp` y cópialo al servidor; **no lo añadas a git**.
 
 Mientras el compose de producción monte un archivo suelto, la única forma de
 cargar la estructura factorizada es **generar un archivo único expandiendo los
@@ -830,18 +859,23 @@ docker exec nexora_nginx du -sh /var/cache/nginx/hls
 
 ### 9.8 Antes de aplicarlo — comparar contra el conf vivo
 
-**Producción no es un repositorio git.** El archivo que corre puede haber
-divergido del versionado (sección 0). Antes de copiar nada:
+**Producción no es un repositorio git.** Lo que corre puede haber divergido del
+versionado (sección 0). **→ Usa el procedimiento de la sección 10**, que compara
+*todos* los ficheros cargados y no solo uno:
 
 ```bash
-# ¿En qué se diferencia lo que corre de lo que hay en el repo?
-docker exec nexora_nginx cat /etc/nginx/conf.d/default.conf > /tmp/vivo.conf
-diff /tmp/vivo.conf /opt/nexora_api/deploy/nginx/nexoraplay.conf
+sudo docker exec nexora_nginx nginx -T > /tmp/nginx-vivo.txt 2>/dev/null
+python scripts/nginx_config_diff.py /tmp/nginx-vivo.txt
 ```
 
-Si el `diff` muestra algo más que el bloque de caché de P1.6, **para**: hay
-cambios en producción que no están en el repo y copiar el archivo los borraría.
-Guarda siempre la copia de seguridad de la sección 4A antes de tocar.
+Si aparece cualquier `DIFIERE` que no sea el bloque de caché de P1.6, **para**:
+hay cambios en producción que no están en el repo y copiar encima los borraría.
+Guarda siempre la copia de seguridad antes de tocar.
+
+*(El comando anterior de esta sección hacía `diff` contra
+`deploy/nginx/nexoraplay.conf`; ese archivo se retiró del repositorio en P0.9.3
+—era un artefacto generado— y el `diff` de un solo archivo tampoco veía los
+`snippets/`, que es justo donde ocurrió el incidente de `tc-mia`.)*
 
 ### 9.9 Revertir
 
@@ -899,14 +933,21 @@ docker exec nexora_nginx nginx -s reload
   La fuente de verdad es `snippets/stream-cache.conf`: **si tocas una copia,
   tócalas las ocho**. Es el mismo patrón de divergencia que produjo el caso de
   tc-mia.
-- **`resolver` fuera del repositorio.** Al montar el banco de pruebas salió que el
-  `proxy_pass` de `/__stream_auth` lleva variables (`$stream_node_v`), y en cuanto
-  `proxy_pass` contiene una variable nginx abandona la resolución en tiempo de
-  carga y **exige un `resolver`** para el nombre del upstream. El gate funciona en
-  producción, así que ese `resolver` tiene que estar en el `nginx.conf` principal
-  — que **no está versionado en este repositorio** (solo hay `conf.d/` y
-  `snippets/`). Es una dependencia preexistente, no la introduce la caché, pero
-  conviene versionar ese archivo antes de que alguien recree el contenedor.
+- ~~**`resolver` fuera del repositorio.**~~ **[VERIF-LAB 2026-07-31] REFUTADO, y
+  conviene saberlo porque cambia P0.9.4.** Se afirmaba que el `proxy_pass` de
+  `/__stream_auth` obliga a declarar un `resolver` por llevar variables, y que ese
+  `resolver` vivía en el `nginx.conf` principal no versionado — de donde se
+  concluía que "si alguien recrea el contenedor, el gate no arranca". **No es
+  así:** nginx solo exige `resolver` cuando la parte de **host** del `proxy_pass`
+  es una variable. Aquí el host es literal (`nexora_api`) y las variables están
+  únicamente en la *query string* (`?node=$stream_node_v&…`). Medido en el banco
+  de la sección 10.3, con el `nginx.conf` de fábrica de la imagen: **cero
+  directivas `resolver`** en todo `nginx -T`, `nginx -t` correcto, y el
+  `auth_request` funcionando de punta a punta (401 sin token, 200 con token).
+  Versionar el `nginx.conf` principal **sigue mereciendo la pena** —la herramienta
+  de la sección 10 lo marca como `SOLO EN VIVO`, y si se recrea el contenedor se
+  pierden `worker_processes`, rutas de log y demás—, pero **no** por esta razón, y
+  el gate **no** depende de ello para arrancar.
 - **Medir el ahorro real.** El AC está probado en laboratorio (12 → 1). Falta la
   cifra en producción: comparar Mbps de entrada en la cabecera antes y después,
   que es el número que decide si P1.6 basta o hace falta además una CDN.
@@ -914,6 +955,171 @@ docker exec nexora_nginx nginx -s reload
   (sección 5.2), pero cambia `proxy_buffering off` → `on` en las rutas de vídeo,
   que es el único cambio de comportamiento de red del parche. Conviene una franja
   con pocos espectadores para poder observar.
+
+---
+
+## 10. Comparar ANTES de copiar — el paso que faltaba (P0.9)
+
+> **Este es el paso más importante del runbook.** Si solo vas a hacer una cosa de
+> todo este documento antes de tocar el edge, haz la 10.2.
+
+### 10.1 Qué falló, y por qué no fue culpa de nginx
+
+El 27-jul-2026, entre las **~03:17 y las ~15:48 UTC**, el `snippets/stream-gate.conf`
+que corría en producción **no tenía** el bloque `location ^~ /stream/tc-mia/`. Las
+peticiones a ese nodo no casaban con ningún `location` de stream, caían en el
+catch-all `location /` de `snippets/app-locations.conf` → web player →
+`try_files … /index.html`, y devolvían **200 con el HTML del SPA**. Doce horas y
+media sin los canales de Miami en **las dos marcas**, y un `200` que se leyó como
+"bypass del gate" cuando era exactamente lo contrario: un `location` ausente.
+Análisis completo en `docs/ANALISIS_BYPASS_TCMIA.md` § 8.
+
+**La causa no fue un error de configuración: el arreglo ya estaba en git.** El
+commit `c1f76e1` añadió `tc-mia` al snippet a las **02:11**. El despliegue de las
+**03:17** —una hora *después*— subió una copia **anterior**, sin `tc-mia`, y la
+pisó. Nadie comparó antes de copiar, porque no había con qué.
+
+Dos defensas independientes, y hacen falta las dos:
+
+| | Qué hace | Dónde |
+|---|---|---|
+| **Cinturón** (10.3) | Si un nodo falta, la petición devuelve **403**, no 200 con HTML | `snippets/stream-gate.conf`, `location ^~ /stream/` |
+| **Comparación** (10.2) | Impide que se despliegue la copia rancia en primer lugar | `scripts/nginx_config_diff.py` |
+
+El cinturón convierte un fallo mudo en un fallo ruidoso. La comparación evita el
+fallo. El cinturón no sustituye a la comparación: con el cinturón puesto, aquel
+día habrían sido 12,5 h de **403 visibles** en vez de 12,5 h de 200 engañosos —
+mejor, pero seguirían siendo 12,5 h sin canales.
+
+### 10.2 El procedimiento — dos comandos, antes de copiar nada
+
+**Paso 1, en el servidor (solo lectura, no recarga nada):**
+
+```bash
+sudo docker exec nexora_nginx nginx -T > /tmp/nginx-vivo.txt 2>/dev/null
+```
+
+`nginx -T` (mayúscula) vuelca **toda** la configuración con los `include` ya
+resueltos, fichero por fichero. Es la única lectura que ve lo mismo que ve nginx.
+
+**Paso 2, donde tengas el repositorio:**
+
+```bash
+python scripts/nginx_config_diff.py /tmp/nginx-vivo.txt
+```
+
+o encadenado, sin fichero intermedio y sin credenciales en ningún sitio:
+
+```bash
+ssh operador@servidor 'sudo docker exec nexora_nginx nginx -T 2>/dev/null' \
+  | python scripts/nginx_config_diff.py -
+```
+
+La herramienta **no abre conexiones, no conoce ninguna IP y no lee ninguna clave**:
+consume el volcado que tú le des, por fichero o por stdin. Sirve igual con `ssh`,
+con un pegado manual o con un volcado guardado de la semana pasada.
+
+Compara **directivas**, no bytes: ignora comentarios y espaciado, que es lo que no
+cambia el comportamiento de nginx (con `--raw` compara byte a byte). Y sale con
+**código distinto de cero si algo diverge**, así que se puede usar como puerta:
+
+```bash
+python scripts/nginx_config_diff.py /tmp/nginx-vivo.txt && ./copiar-y-recargar.sh
+```
+
+**Salidas: 0 = coincide · 1 = diverge · 2 = no se pudo comparar** (un error de
+lectura NO cuenta como "todo bien"; por eso tiene código propio).
+
+#### Qué hacer con cada hallazgo
+
+| Hallazgo | Qué significa | Qué hacer |
+|---|---|---|
+| **`DIFIERE`** | El fichero está en los dos sitios y no coincide | **PARA.** Puede ser (a) algo que el repo tiene sin desplegar —normal si vienes a desplegarlo—, o (b) una edición en caliente que solo existe en el servidor. Mira el diff: lo que aparezca **solo en el lado `vivo:` y no esté en ningún commit** es (b), y copiar encima **lo borra**. Llévalo primero a git, y después despliega. |
+| **`FALTA`** | Está versionado y nginx **no lo carga** | **Es la forma exacta del incidente de tc-mia.** El arreglo existe en git y producción no lo tiene. Comprueba que no sea un vhost nuevo que aún no toca dar de alta; si no lo es, cópialo y recarga. |
+| **`SOLO EN VIVO`** | nginx lo carga y el repo no lo versiona | Hoy salen `/etc/nginx/nginx.conf` y `/etc/nginx/mime.types` (los trae la imagen). Si aparece **cualquier otro**, alguien dejó configuración solo en el servidor: recupérala y versiónala antes de recrear el contenedor. Para silenciar los dos conocidos: `--allow-unversioned '/etc/nginx/nginx.conf' --allow-unversioned '/etc/nginx/mime.types'`. |
+
+**Guarda siempre el volcado.** `/tmp/nginx-vivo.txt` es la foto de lo que había
+antes de tu cambio: si algo se tuerce, es la referencia del rollback y no depende
+de que nadie recuerde qué tocó.
+
+> **Límite honesto de la herramienta.** Solo ve lo que `nginx -T` volcó. Si el
+> volcado se tomó *después* de copiar, ya no sirve para decidir; y no compara
+> permisos, `mtime` ni ficheros que nginx no carga (un `.bak` en `snippets/` no
+> aparece, porque los `include` son por nombre exacto y nginx no lo lee).
+
+### 10.3 El cinturón: un nodo no declarado devuelve 403 — [VERIF-LAB]
+
+`snippets/stream-gate.conf` termina con:
+
+```nginx
+location ^~ /stream/ {
+    access_log /dev/stdout stream_safe;
+    default_type application/json;
+    return 403 '{"success":false,"error":"stream node not declared on this edge"}';
+}
+```
+
+**Por qué no se come las rutas vivas.** nginx elige el `location` de **prefijo más
+largo**, con independencia del orden en el archivo; `^~` solo decide si además se
+saltan las locations por regex. `/stream/` es más corto que `/stream/ec-main/`,
+`/stream/co-main/`, `/stream/tc-main/` y `/stream/tc-mia/`, así que este bloque
+solo actúa cuando **ninguno** de ellos casa. **No se asumió: se midió.**
+
+**Por qué 403 y no 401.** Un 401 sería indistinguible de la denegación normal de
+`@stream_denied`, y entonces la verificación de la sección 6.2 ("sin token → 401
+en los cuatro nodos") daría **verde con un nodo borrado de la config**: el mismo
+fallo silencioso un piso más arriba. El 403 hace visible el nodo ausente en la
+comprobación que si no lo taparía. Contrapartida aceptada: permite distinguir qué
+prefijos de nodo existen; no es secreto (el propio reproductor construye esas
+URLs), y no acerca al `stream_key` ni al token.
+
+**Banco de pruebas.** Igual que el anexo A pero con stubs en una red propia, para
+poder medir códigos de respuesta y no solo `nginx -t`. Tres contenedores auxiliares
+con **alias de red** `nexora_api` (devuelve 204 si `X-Playback-Token: GOODTOKEN`,
+401 si no), `nexora_web_player` (SPA con `try_files … /index.html`) y `nexora_hls`
+(sirve un manifiesto de mentira), más el edge montando `conf.d/` y `snippets/` del
+repositorio. Los alias evitan chocar con los contenedores de desarrollo, que se
+llaman igual; no se publica ningún puerto y las peticiones salen desde dentro del
+propio edge con `curl --resolve`.
+
+Resultado medido en `nginx:1.27-alpine` (**la versión de producción**), vhost
+`nexoraplay.net`, y **repetido idéntico** en `tvdigital.laredtelco.com`:
+
+```
+nginx -t                                          -> syntax is ok / test is successful
+
+/stream/nodo-inventado/x.ts                       -> 403  {"success":false,"error":"stream node not declared on this edge"}
+/stream/nodo-inventado/x.m3u8?token=GOODTOKEN     -> 403  (el cinturón no consulta al backend: no hay a qué autorizar)
+/stream/tc-main/GAMATV/index.m3u8                 -> 401  {"success":false,"error":"playback token required or invalid"}
+/stream/tc-main/GAMATV/index.m3u8?token=GOODTOKEN -> 200  STUB-HLS-MANIFEST      <- el gate sigue mandando
+/stream/ec-main/x.m3u8                            -> 401
+/stream/                                          -> 403
+/                                                 -> 200  <html>SPA-INDEX-STUB</html>   <- catch-all intacto
+/api/health                                       -> 200  ok
+```
+
+Y el **control**, la misma configuración con el cinturón quitado —o sea, el estado
+del 27-jul—:
+
+```
+/stream/nodo-inventado/x.ts    -> 200  Content-Type: text/html  <html>SPA-INDEX-STUB</html>
+```
+
+Ese control es, además, la **primera medida directa** de algo que hasta ahora era
+deducción: `docs/ANALISIS_BYPASS_TCMIA.md` § 8.6 dejó constancia de que el
+`Content-Type` del 200 original nunca se midió y que la ventana ya no era
+reproducible en producción. En laboratorio **sí** es reproducible, y confirma la
+deducción: era `text/html` del SPA, no vídeo.
+
+El token tampoco se filtra en el log del 403: la línea sale por `stream_safe` y
+queda `"GET /stream/nodo-inventado/x.m3u8" 403 65 cache=-`, sin la query string.
+
+> **Lo que este cinturón NO cubre.** Solo está en la config factorizada
+> (`snippets/stream-gate.conf`), que es la que corre. El vhost de staging
+> (`deploy/nginx/staging/nexoraplay.staging.conf`) es un archivo autónomo que **no
+> incluye los snippets** y sigue **sin** cinturón: un nodo no declarado allí sigue
+> devolviendo el HTML del SPA. Pendiente, y anotado aquí para que no se descubra
+> otra vez a base de incidente.
 
 ---
 
@@ -984,6 +1190,8 @@ Si esto pasa, el archivo es autosuficiente y se puede copiar al servidor.
 
 ```
 [ ]  0. docker inspect nexora_nginx  ->  ¿camino A o B?
+[ ] 0b. nginx -T > /tmp/nginx-vivo.txt  +  scripts/nginx_config_diff.py
+        ->  exit 0 ANTES de copiar nada (sección 10.2). EL PASO QUE FALTABA.
 [ ]  1. Registro A -> 45.184.225.4, sin proxy naranja
 [ ]  2. dig desde dos resolvers públicos coincide
 [ ]  3. curl al /.well-known/ del dominio devuelve 404 (no timeout)
@@ -995,9 +1203,12 @@ Si esto pasa, el archivo es autosuficiente y se puede copiar al servidor.
 [ ]  9. Validación en contenedor desechable (anexo A) -> test is successful
 [ ] 10. Copia de seguridad del archivo actual en /root/
 [ ] 11. nginx -t && nginx -s reload   (con el &&)
+[ ]11b. Repetir la comparación de la 10.2 DESPUÉS: debe salir exit 0
+        (si no, lo copiado no es lo que corre)
 [ ] 12. SNI: cada dominio devuelve SU CN
 [ ] 13. Host desconocido -> tlsv1 unrecognized name
 [ ] 14. Gate -> 401 sin token en los 4 nodos, en el dominio nuevo
+[ ]14b. Cinturón -> /stream/nodo-inventado/x.ts devuelve 403 (NUNCA 200 con HTML)
 [ ] 15. Nodos de stream con token -> 200 en el dominio antiguo
 [ ] 16. docker ps -> Up, no Restarting
 [ ] 17. logs sin 'token=' 
@@ -1009,6 +1220,7 @@ Si esto pasa, el archivo es autosuficiente y se puede copiar al servidor.
 
 ## Referencias
 
+- `scripts/nginx_config_diff.py` — comparación repo↔vivo. **Ejecútala antes de copiar** (sección 10.2).
 - `deploy/nginx/README.md` — anatomía del edge y las trampas de la estructura.
 - `deploy/nginx/conf.d/00-default-server.conf` — el catch-all que responde el reto ACME.
 - `deploy/nginx/snippets/stream-gate.conf` — copia única del gate de `/stream/*`.

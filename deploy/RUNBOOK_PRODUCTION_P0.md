@@ -22,7 +22,12 @@ Flags P0 (en `.env.production`), por orden de activación:
   y `FLUSSONIC_CO_MAIN_BASE_URL=https://nexoraplay.net/stream/co-main`. Así `stream_hls_url()` ya
   emite `https://nexoraplay.net/stream/<node>/<stream>/index.m3u8` y `_maybe_sign` le añade `?token=`.
 - Endpoint `/internal/stream-auth/validate` desplegado (router `app/api/internal/stream_auth.py`).
-- Backup obligatorio de `.env.production` y de `deploy/nginx/nexoraplay.conf` antes de tocar nada.
+- Backup obligatorio de `.env.production` y de la config de nginx antes de tocar nada.
+  **Y antes del backup, la comparación:** `nginx -T` + `scripts/nginx_config_diff.py`
+  (`RUNBOOK_EDGE_MULTIDOMINIO.md` § 10.2). Copiar sin comparar es lo que costó 12,5 h
+  de canales caídos el 27-jul-2026. La config viva ya no es un archivo suelto sino
+  `conf.d/` + `snippets/`; `deploy/nginx/nexoraplay.conf` era un artefacto generado y
+  se retiró del repositorio en P0.9.3.
 - Cutover preferentemente **sin sesiones activas** (verificar Redis `active_conns` / logs `/stream`).
 
 ### Orden correcto (CRÍTICO)

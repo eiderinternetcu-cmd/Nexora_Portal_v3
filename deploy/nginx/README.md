@@ -75,7 +75,10 @@ deploy/nginx/
 │   ├── security-headers.conf
 │   ├── proxy-common.conf
 │   ├── app-locations.conf
+│   ├── stream-cache.conf       ← caché de segmentos HLS (P1.6). Va DESPUÉS del gate, no lo relaja
 │   └── stream-gate.conf        ← ÚNICA copia del control de autorización de /stream/*
+│                                 Termina con el CINTURÓN `location ^~ /stream/` → 403 (P0.9.1):
+│                                 un nodo no declarado falla en voz alta y no cae en el SPA
 └── staging/                    → NO se monta en producción. Ver §7.
     ├── nexoraplay.staging.conf
     └── nexoraplay.stream-auth.example.conf
@@ -190,6 +193,15 @@ Arreglo (una sola vez, cubre también las marcas futuras) →
 [RUNBOOK §8](../RUNBOOK_EDGE_MULTIDOMINIO.md#8-el-hook-de-renovación--pendiente-en-producción).
 
 ## 5. Producción monta un ARCHIVO, no el directorio
+
+> **⚠ [VERIF-PROD 2026-07-31] YA NO ES ASÍ.** El volcado de `nginx -T` del
+> servidor muestra los ficheros de `conf.d/` y `snippets/` cargados por separado
+> (`docs/ANALISIS_BYPASS_TCMIA.md` § 8.2), es decir, **los directorios ya están
+> montados**. Esta trampa está superada; se conserva porque explica de dónde
+> viene el archivo generado y porque el rollback de esa época sigue documentado.
+> **No te fíes de esta sección ni de ninguna otra escrita en otra sesión: mídelo**
+> con `scripts/nginx_config_diff.py`
+> ([RUNBOOK § 10.2](../RUNBOOK_EDGE_MULTIDOMINIO.md#102-el-procedimiento--dos-comandos-antes-de-copiar-nada)).
 
 El compose que corre en el servidor monta:
 

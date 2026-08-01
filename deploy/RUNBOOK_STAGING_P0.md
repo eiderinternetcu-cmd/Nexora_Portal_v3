@@ -66,7 +66,9 @@ curl -fsS http://<staging>:8000/health    # redis ok
 ## 5. Aplicar Nginx auth_request (SOLO staging)
 ```bash
 # Copia de seguridad del conf actual de staging:
-cp deploy/nginx/nexoraplay.conf /backup/nginx_staging_$(date +%s).conf
+# (la ruta antigua `deploy/nginx/nexoraplay.conf` era un archivo GENERADO y se
+#  retiró del repositorio en P0.9.3; el conf de staging es este)
+cp deploy/nginx/staging/nexoraplay.staging.conf /backup/nginx_staging_$(date +%s).conf
 # Integrar el bloque de deploy/nginx/nexoraplay.stream-auth.example.conf:
 #   - location = /__stream_auth  (internal → /internal/stream-auth/validate)
 #   - reemplazar las location /stream/ec-main|co-main por las versiones con auth_request
