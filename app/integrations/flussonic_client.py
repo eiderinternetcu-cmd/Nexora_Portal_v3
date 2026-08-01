@@ -203,41 +203,32 @@ _node_clients: dict[str, FlussonicClient] = {}
 def get_flussonic_node_client(node_id: str) -> FlussonicClient | None:
     """Return the FlussonicClient for a specific node ID.
 
-    Supported nodes: 'ec-main', 'co-main', 'ec-quito'.
-    Returns None if the node is not configured (missing base_url or credentials).
-    Phase 4.4 will replace this with a full FlussonicNodeRegistry.
+    The node table is NOT here any more: which nodes exist and which settings
+    hold their base_url / credentials is declared once in
+    app/integrations/flussonic_registry.py (P2.2), so adding a node no longer
+    means editing an if/elif chain here and a parallel dict in
+    services/node_health.py. Returns None for an unknown node id.
+
+    NOTE for failover: this factory answers for the node it is ASKED about. It
+    deliberately does NOT substitute a healthy node on its own — that would move
+    only the playback URL while the token kept the old `node` claim, i.e. the
+    cross-node token reuse NX-NODE closed. Node selection happens once per
+    request in flussonic_registry.resolve_playback_node(), before the token is
+    minted; see that module's docstring.
     """
     global _node_clients
     if node_id in _node_clients:
         return _node_clients[node_id]
 
-    from app.config import get_settings
-    s = get_settings()
-
-    if node_id == "ec-main":
-        client = FlussonicClient(
-            base_url=s.flussonic_base_url,
-            user=s.flussonic_readonly_user,
-            password=s.flussonic_readonly_password,
-            mgmt_base_url=s.flussonic_mgmt_base_url,
-        )
-    elif node_id == "co-main":
-        client = FlussonicClient(
-            base_url=s.flussonic_co_main_base_url,
-            user=s.flussonic_co_main_user,
-            password=s.flussonic_co_main_password,
-            mgmt_base_url=s.flussonic_co_main_mgmt_base_url,
-        )
-    elif node_id == "ec-quito":
-        client = FlussonicClient(
-            base_url=s.flussonic_ec_quito_base_url,
-            user=s.flussonic_ec_quito_user,
-            password=s.flussonic_ec_quito_password,
-            mgmt_base_url=s.flussonic_ec_quito_mgmt_base_url,
-        )
-    else:
+    from app.integrations.flussonic_registry import node_credentials
+    creds = node_credentials(node_id)
+    if creds is None:
         logger.warning("Unknown Flussonic node_id: %s", node_id)
         return None
 
+    base_url, user, password, mgmt_base_url = creds
+    client = FlussonicClient(
+        base_url=base_url, user=user, password=password, mgmt_base_url=mgmt_base_url
+    )
     _node_clients[node_id] = client
     return client

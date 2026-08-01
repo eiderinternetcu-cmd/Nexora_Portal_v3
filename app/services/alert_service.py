@@ -42,6 +42,18 @@ class AlertService:
             return "resolved"
         return None
 
+    async def is_node_down(self, node_id: str) -> bool:
+        """True while an open 'node down' alert exists for `node_id`.
+
+        The single read side of record_node_health, so consumers (node failover,
+        P2.2) never have to reproduce the key format and can never disagree with
+        what /admin/alerts shows. One Redis EXISTS — cheap enough to call on the
+        playback path. Freshness is the monitor's interval (2 min), and honesty
+        is NODE_PROBE_MODE's: the legacy `origin` probe cannot reach any origin
+        and reports every node down.
+        """
+        return bool(await self.redis.exists(self._key("node", node_id)))
+
     async def active_alerts(self) -> list[dict]:
         alerts: list[dict] = []
         async for k in self.redis.scan_iter(match=_PREFIX + "*"):
