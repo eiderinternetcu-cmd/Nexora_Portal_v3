@@ -25,8 +25,23 @@ class AuditLog(Base):
     ip_address: Mapped[str | None] = mapped_column(String(45))
     user_agent: Mapped[str | None] = mapped_column(Text)
 
+    # Part of the PRIMARY KEY, not decoration. Migration 011 partitions
+    # audit_logs by RANGE (created_at), and Postgres requires every unique or
+    # primary key on a partitioned table to contain all partition-key columns —
+    # so PRIMARY KEY (id) cannot survive partitioning and becomes
+    # PRIMARY KEY (id, created_at). Declared here so the ORM and the migrated
+    # schema keep agreeing (tests/test_migration_schema_parity.py compares them).
+    #
+    # Consequence, recorded rather than glossed over: `id` on its own is no
+    # longer ENFORCED unique, because Postgres cannot build a global unique index
+    # that omits the partition key. It is an application-generated UUIDv4 and the
+    # pair stays unique, so nothing in the codebase relies on what was lost —
+    # nothing looks an audit row up by bare id.
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True
+        DateTime(timezone=True),
+        primary_key=True,
+        default=lambda: datetime.now(timezone.utc),
+        index=True,
     )
 
     def __repr__(self) -> str:

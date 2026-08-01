@@ -1,5 +1,6 @@
 import uuid
-from sqlalchemy import select, desc
+from typing import Any
+from sqlalchemy import select, desc, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.audit import (
@@ -65,3 +66,77 @@ class AuditService:
         self.db.add(entry)
         await self.db.flush()
         return entry
+
+    # ── Partition maintenance (migration 011) ────────────────────────────────
+    #
+    # audit_logs is RANGE-partitioned by month. Somebody has to create next
+    # month's partition, and "somebody" must not mean a human with a calendar
+    # reminder. These two wrappers are the callable surface a scheduler needs; the
+    # logic itself is SQL in the `audit_part` schema so a cron job, pg_cron, psql
+    # or the application can all drive one implementation. See
+    # docs/AUDIT_PARTITIONING.md.
+    #
+    # Missing the schedule is survivable by design — a row matching no partition
+    # lands in the DEFAULT partition instead of raising, so a forgotten job cannot
+    # take down the login path that writes these rows.
+
+    async def _partitioning_installed(self) -> bool:
+        """False on a database whose schema came from the ORM rather than Alembic.
+
+        tests/conftest.py builds every test database with
+        `Base.metadata.create_all()`, which produces a plain, unpartitioned table
+        and none of the `audit_part` machinery. Without this probe both methods
+        below would raise UndefinedFunction there — so a scheduler wired to them
+        would be reported as broken by the test suite while being perfectly
+        healthy in production. Degrade to a no-op instead.
+        """
+        return bool(
+            (
+                await self.db.execute(
+                    text("SELECT to_regprocedure('audit_part.ensure_partitions(int)') IS NOT NULL")
+                )
+            ).scalar()
+        )
+
+    async def ensure_partitions(self, premake: int | None = None) -> list[str]:
+        """Create the current month's partition and the next few. Idempotent.
+
+        Safe to call on any schedule and from more than one process at once:
+        months that already exist, or that another run created concurrently, are
+        skipped rather than treated as errors. Returns the partitions that exist
+        as a result. `premake=None` uses audit_part.retention_policy.premake_months.
+        """
+        if not await self._partitioning_installed():
+            return []
+        rows = await self.db.execute(
+            text("SELECT unnest(audit_part.ensure_partitions(:premake))"),
+            {"premake": premake},
+        )
+        return [r[0] for r in rows]
+
+    async def apply_retention(self, dry_run: bool = True) -> list[dict[str, Any]]:
+        """Drop partitions whose whole range has aged out of the retention window.
+
+        `dry_run=True` by DEFAULT, matching the SQL function: the careless call
+        reports what it *would* drop and removes nothing. Even `dry_run=False`
+        deletes nothing unless `audit_part.retention_policy.enabled` has been set
+        to true by a human — two independent gates, because an audit trail that
+        quietly starts forgetting is an audit trail nobody can rely on.
+
+        Dropping a partition is DDL and fires no row trigger, so this does not
+        weaken the append-only guarantee migration 007 installed: whole records
+        are discarded under a stated policy; no row is ever rewritten.
+        """
+        if not await self._partitioning_installed():
+            return []
+        rows = await self.db.execute(
+            text(
+                "SELECT partition_name, upper_bound, dropped "
+                "FROM audit_part.apply_retention(:dry_run)"
+            ),
+            {"dry_run": dry_run},
+        )
+        return [
+            {"partition": name, "upper_bound": upper, "dropped": dropped}
+            for name, upper, dropped in rows
+        ]
