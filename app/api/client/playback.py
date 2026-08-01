@@ -21,7 +21,9 @@ from app.schemas.client import PlaybackAuthorizeRequest, PlaybackResponse
 from app.services.stream_auth_service import StreamAuthService
 from app.services.metrics_service import MetricsService
 from app.services.channel_service import ChannelService
+from app.services.parental_service import ParentalService
 from app.integrations.flussonic_client import get_flussonic_node_client
+from app.integrations.flussonic_registry import resolve_playback_node
 from app.models.channel import Channel
 
 router = APIRouter(prefix="/playback", tags=["Client Playback"])
@@ -108,6 +110,7 @@ def _resolve_playback_url(
     channel: Channel | None,
     stream_key: str | None,
     request: Request | None = None,
+    node_id: str | None = None,
 ) -> str | None:
     """Build the HLS URL using the channel's assigned Flussonic node.
 
@@ -121,11 +124,16 @@ def _resolve_playback_url(
     taken from the request (allowlisted — see _request_origin) while the PATH
     configured in the node base_url is preserved. Without a request, an empty
     allowlist or an unlisted Host the fixed base_url is used, unchanged.
+
+    `node_id` is the node the CALLER already resolved for this request (P2.2
+    failover) and it must be the SAME value that went into the token's `node`
+    claim — otherwise the URL points at one node while the token authorizes
+    another. Omitted → the channel's declared node, i.e. the previous behavior.
     """
     if channel is None:
         return None
 
-    node_id = channel.flussonic_node or "ec-main"
+    node_id = node_id or channel.flussonic_node or "ec-main"
     client = get_flussonic_node_client(node_id)
     origin = _request_origin(request)
 
@@ -145,6 +153,14 @@ def _resolve_playback_url(
     #   - only an absolute same-origin value ("https://nexoraplay.net/stream/...")
     #     names an origin we control, and it is the single shape that breaks when
     #     the page is served from a second domain, so it is the only one swapped.
+    # …and it is only a fallback for the channel's OWN node. source_url is a
+    # stored URL that names the declared node in its path
+    # ("/stream/co-main/X/index.m3u8"); after a failover the token says another
+    # node, so returning it here would contradict the token we just minted. No
+    # URL is better than a URL the gate will refuse.
+    if node_id != (channel.flussonic_node or "ec-main"):
+        return None
+
     src = channel.source_url
     if src and urlsplit(src).netloc.lower() in settings.playback_allowed_hosts:
         return _rewrite_origin(src, origin)
@@ -177,11 +193,35 @@ async def authorize_playback(
         ch = await ChannelService(db).get_active_by_key(data.channel_id)
         stream_key = ch.stream_key
 
+    # NX-PARENTAL. This is THE point of control: the PIN is checked here, on the
+    # server, before StreamAuthService is called — so a denial mints no token,
+    # opens no connection slot and creates no IPTV session, exactly like the
+    # entitlement gate inside authorize(). A PIN validated by the app would be a
+    # suggestion; this request is replayable by hand with any client token.
+    # No-op unless PARENTAL_CONTROL_ENFORCE is on AND the channel is censored.
+    #
+    # Deliberately OUTSIDE the metrics try/except below: "the user has not typed
+    # the PIN yet" is a normal step of the parental flow, not a playback failure,
+    # and counting it would bury real failures under the zapping of every
+    # household with an adult tier.
+    await ParentalService(db, redis).require_channel_access(
+        subscriber, data.device_id, ch
+    )
+
     node = ch.flussonic_node if ch is not None else None
 
     svc = StreamAuthService(db, redis)
     metrics = MetricsService(redis)
     try:
+        # NX-FLU. Resolve the node ONCE, here, before any token exists. The value
+        # returned feeds BOTH svc.authorize(node=…) — which writes it into the
+        # token's `node` claim — and the /stream/<node>/ path of the playback_url
+        # built below, so a failover can never hand out a URL on one node with a
+        # token bound to another (which is what PLAYBACK_NODE_BINDING_ENFORCE
+        # refuses, and what the flag being off would silently allow).
+        # No-op unless FLUSSONIC_FAILOVER_MODE is on. Inside the try so a
+        # 503 NODE_UNAVAILABLE is counted like any other playback failure.
+        node = await resolve_playback_node(redis, node, stream_key)
         result = await svc.authorize(
             subscriber_id=subscriber.id,
             device_id_str=data.device_id,
@@ -197,7 +237,7 @@ async def authorize_playback(
     await metrics.record_playback_success()
     await db.commit()
 
-    base_url = _resolve_playback_url(ch, stream_key, request)
+    base_url = _resolve_playback_url(ch, stream_key, request, node_id=node)
     return PlaybackResponse(
         token=result.token,
         expires_in=result.expires_in,
@@ -228,7 +268,22 @@ async def reissue_playback_token(
     tokens in flight are reissues).
     """
     ch = await ChannelService(db).get_active_by_key(channel_id)
-    node = ch.flussonic_node
+
+    # NX-PARENTAL. Gated exactly like /authorize, and NOT behind a separate
+    # opt-in the way the entitlement recheck is (PLAYBACK_REISSUE_ENTITLEMENT_CHECK):
+    # this route mints a token for whatever channel it is asked for, so gating
+    # only /authorize would leave the adult tier one path parameter away for any
+    # client holding an open session. There is no continuity argument for
+    # tolerating it either — the unlock grant slides on every check, so a
+    # legitimately unlocked viewer renews indefinitely while watching.
+    await ParentalService(db, redis).require_channel_access(subscriber, device_id, ch)
+
+    # NX-FLU, same contract as /authorize: one resolution feeding both the new
+    # token's `node` claim and the URL. This is also where failover actually
+    # takes effect for a session already playing — the player reissues every
+    # ~45s, so a node that goes down is picked up within one token lifetime
+    # WITHOUT the gate ever having to accept a token issued for another node.
+    node = await resolve_playback_node(redis, ch.flussonic_node, ch.stream_key)
 
     svc = StreamAuthService(db, redis)
     result = await svc.create_token(
@@ -240,7 +295,7 @@ async def reissue_playback_token(
         ip=_get_ip(request),
     )
 
-    base_url = _resolve_playback_url(ch, ch.stream_key, request)
+    base_url = _resolve_playback_url(ch, ch.stream_key, request, node_id=node)
     return PlaybackResponse(
         token=result.token,
         expires_in=result.expires_in,

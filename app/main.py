@@ -27,6 +27,7 @@ configure_correlation_logging()
 
 _CLEANUP_INTERVAL_SECONDS = 900  # 15 minutes
 _STREAM_MONITOR_INTERVAL_SECONDS = 120  # 2 minutes
+_EPG_STARTUP_DELAY_SECONDS = 120  # warmup, behind the two monitors above
 
 
 async def _cleanup_expired_sessions() -> None:
@@ -78,6 +79,48 @@ async def _stream_health_monitor() -> None:
         await asyncio.sleep(_STREAM_MONITOR_INTERVAL_SECONDS)
 
 
+async def _epg_ingest_loop() -> None:
+    """Background task (NX-EPG): re-ingest the XMLTV programme guide periodically.
+
+    Deliberately the SAME shape as `_stream_health_monitor` above — an asyncio
+    task started by the lifespan, a warmup sleep, a `while True` with the body
+    wrapped so one bad cycle cannot kill the loop, and a fixed interval — rather
+    than introducing APScheduler/Celery/cron. This project already does periodic
+    work exactly this way twice; a third scheduler would be a new dependency, a
+    new failure mode and a new thing to deploy, for a job that runs every 6 hours.
+
+    Two guards before anything happens, so an unconfigured deployment never
+    fetches on a timer: EPG_INGEST_ENABLED must be on AND EPG_SOURCE_URL must be
+    set. The task then RETURNS instead of looping — no idle task, and the log
+    line says which half is missing.
+
+    Errors are caught and logged, never raised: a provider outage, a malformed
+    feed or a hostile document must leave the previously ingested guide in place
+    and the API serving it. `run_ingest_once` owns the transaction, so a failed
+    cycle commits nothing.
+    """
+    from app.services.epg_service import run_ingest_once
+
+    cfg = get_settings()
+    if not cfg.epg_ingest_enabled:
+        return
+    if not cfg.epg_source_url.strip():
+        print("[nexora-api] EPG ingest enabled but EPG_SOURCE_URL is empty — not starting")
+        return
+
+    await asyncio.sleep(_EPG_STARTUP_DELAY_SECONDS)
+    while True:
+        try:
+            async with AsyncSessionLocal() as db:
+                result = await run_ingest_once(db)
+            print(f"[nexora-api] EPG ingest: {result}")
+        except Exception as exc:
+            # Includes XmltvSecurityError — a feed that tried an entity attack is
+            # a security event, not an empty guide, and it must be greppable.
+            print(f"[nexora-api] EPG ingest error: {type(exc).__name__}: {exc}")
+        await asyncio.sleep(cfg.epg_ingest_interval_seconds)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
@@ -86,9 +129,10 @@ async def lifespan(app: FastAPI):
     print("[nexora-api] Redis connected")
     cleanup_task = asyncio.create_task(_cleanup_expired_sessions())
     monitor_task = asyncio.create_task(_stream_health_monitor())
+    epg_task = asyncio.create_task(_epg_ingest_loop())
     yield
     # Shutdown
-    for t in (cleanup_task, monitor_task):
+    for t in (cleanup_task, monitor_task, epg_task):
         t.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await t

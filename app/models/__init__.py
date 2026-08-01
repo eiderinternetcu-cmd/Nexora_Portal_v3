@@ -7,6 +7,7 @@ from app.models.audit import AuditLog
 from app.models.session import Session
 from app.models.channel import Channel
 from app.models.plan_channel import PlanChannel
+from app.models.epg_programme import EpgProgramme
 
 __all__ = [
     "User", "UserRole",
@@ -18,4 +19,5 @@ __all__ = [
     "Session",
     "Channel",
     "PlanChannel",
+    "EpgProgramme",
 ]
