@@ -82,6 +82,43 @@ class PlaybackResponse(BaseModel):
     playback_url: str | None = None  # Direct HLS URL when source_url is configured on the channel
 
 
+# ── Parental control (NX-PARENTAL) ──────────────────────────────────────────
+# The PIN is 4-6 DIGITS, pinned by pattern here so a malformed value is rejected
+# before it reaches an Argon2id verification (and before it can consume an
+# attempt). No response model ever carries a PIN, in any form.
+
+_PIN_PATTERN = r"^\d{4,6}$"
+
+
+class ParentalStatusResponse(BaseModel):
+    """What the client needs to decide between "set a PIN" and "ask for it".
+
+    `pin_set` is a boolean about the caller's own account — not a secret, and
+    already inferable from the deny codes at playback.
+    """
+    enforced: bool          # PARENTAL_CONTROL_ENFORCE — is the gate live at all
+    pin_set: bool
+    unlock_ttl_seconds: int
+
+
+class ParentalPinSetRequest(BaseModel):
+    """Set or change the PIN. `current_pin` is required only when one exists —
+    see ParentalService.set_pin for why the change path demands it."""
+    new_pin: str = Field(..., pattern=_PIN_PATTERN)
+    current_pin: str | None = Field(None, pattern=_PIN_PATTERN)
+
+
+class ParentalUnlockRequest(BaseModel):
+    """The one place a PIN is accepted. Deliberately NOT a field on
+    PlaybackAuthorizeRequest — see the ParentalService module docstring."""
+    device_id: str = Field(..., min_length=6, max_length=128)
+    pin: str = Field(..., pattern=_PIN_PATTERN)
+
+
+class ParentalUnlockResponse(BaseModel):
+    expires_in: int         # unlock grant TTL, seconds (slides while in use)
+
+
 class ClientHeartbeatRequest(BaseModel):
     device_id: str = Field(..., min_length=6, max_length=128)
     app_version: str | None = Field(None, max_length=32)

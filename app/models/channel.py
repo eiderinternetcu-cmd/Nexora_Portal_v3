@@ -25,6 +25,14 @@ class Channel(Base):
     epg_id: Mapped[str | None] = mapped_column(String(128))
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
     requires_subscription: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # NX-PARENTAL — adult / age-restricted channel. This column is a LABEL, not a
+    # control: nothing about it prevents playback on its own. The gate is
+    # ParentalService, consulted by the client playback routes before a token is
+    # minted (see app/services/parental_service.py).
+    # Deliberately NOT indexed: no query filters the catalog *by* this column —
+    # it is read off a channel row already fetched by channel_key, so an index
+    # would only cost writes.
+    censored: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
