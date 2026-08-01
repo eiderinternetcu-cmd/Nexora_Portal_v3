@@ -1,8 +1,12 @@
-"""M2 — playback observability counters (MetricsService + /authorize wiring)."""
+"""M2 — playback observability counters (MetricsService + /authorize wiring).
+P2.1 — Prometheus exposition endpoint (GET /api/admin/metrics/prometheus).
+"""
 import httpx
 import pytest
 from httpx import ASGITransport
 
+from app.config import get_settings
+from app.models.channel import Channel
 from app.services.metrics_service import MetricsService, _norm_reason
 from app.services import stream_auth_service as sas_mod
 
@@ -82,3 +86,105 @@ async def test_authorize_records_success_and_failure(entitlement_world, redis_cl
     assert snap["authorize_success"] == 1
     assert snap["authorize_failure"] == 1
     assert snap["failure_by_reason"].get("CHANNEL_NOT_INCLUDED") == 1
+
+
+# ── P2.1: Prometheus exposition endpoint ──────────────────────────────────────
+
+async def _prom_client(db, redis):
+    from app.main import app
+    from app.database import get_db
+    from app.redis_client import get_redis
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[get_redis] = lambda: redis
+    return app
+
+
+def _no_configured_nodes(monkeypatch):
+    """Keep check_all_nodes() a no-op (no real network calls) regardless of
+    what a local .env happens to set — this endpoint's node section is already
+    covered by app/services/node_health tests."""
+    s = get_settings()
+    monkeypatch.setattr(s, "flussonic_base_url", "", raising=False)
+    monkeypatch.setattr(s, "flussonic_co_main_base_url", "", raising=False)
+    monkeypatch.setattr(s, "flussonic_ec_quito_base_url", "", raising=False)
+
+
+async def test_prometheus_disabled_without_a_configured_token(monkeypatch, db_session, redis_client):
+    """Unset METRICS_PROMETHEUS_TOKEN → the endpoint refuses everyone, never
+    silently open."""
+    monkeypatch.setattr(get_settings(), "metrics_prometheus_token", "")
+    app = await _prom_client(db_session, redis_client)
+    try:
+        async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            r = await c.get("/api/admin/metrics/prometheus",
+                             headers={"Authorization": "Bearer whatever"})
+    finally:
+        app.dependency_overrides.clear()
+    assert r.status_code == 401
+
+
+async def test_prometheus_rejects_wrong_or_missing_token(monkeypatch, db_session, redis_client):
+    monkeypatch.setattr(get_settings(), "metrics_prometheus_token", "s3cr3t-scrape-token")
+    app = await _prom_client(db_session, redis_client)
+    try:
+        async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            wrong = await c.get("/api/admin/metrics/prometheus",
+                                 headers={"Authorization": "Bearer nope"})
+            missing = await c.get("/api/admin/metrics/prometheus")
+    finally:
+        app.dependency_overrides.clear()
+    assert wrong.status_code == 401
+    assert missing.status_code == 401
+
+
+async def test_prometheus_accepts_the_configured_bearer_token(monkeypatch, db_session, redis_client):
+    _no_configured_nodes(monkeypatch)
+    monkeypatch.setattr(get_settings(), "metrics_prometheus_token", "s3cr3t-scrape-token")
+    m = MetricsService(redis_client)
+    await m.record_playback_success()
+    await m.record_playback_failure("DEVICE_NOT_REGISTERED")
+
+    app = await _prom_client(db_session, redis_client)
+    try:
+        async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            r = await c.get("/api/admin/metrics/prometheus",
+                             headers={"Authorization": "Bearer s3cr3t-scrape-token"})
+    finally:
+        app.dependency_overrides.clear()
+
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"].startswith("text/plain")
+    body = r.text
+    assert "# TYPE nexora_iptv_sessions_active gauge" in body
+    assert "nexora_playback_authorize_total 2" in body
+    assert "nexora_playback_authorize_success_total 1" in body
+    assert 'nexora_playback_authorize_failure_reason_total{reason="DEVICE_NOT_REGISTERED"} 1' in body
+
+
+async def test_prometheus_exposes_channel_state_by_channel_key_only(
+    monkeypatch, db_session, redis_client
+):
+    """Per-channel cardinality is bounded and safe (channel_key, ~41 rows) —
+    but stream_key (a playable-URL secret) must never appear."""
+    _no_configured_nodes(monkeypatch)
+    monkeypatch.setattr(get_settings(), "metrics_prometheus_token", "s3cr3t-scrape-token")
+    db_session.add(Channel(channel_key="ch-mon", number=1, name="Monitored",
+                            stream_key="TOP_SECRET_KEY", is_active=True))
+    await db_session.commit()
+
+    app = await _prom_client(db_session, redis_client)
+    try:
+        async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            r = await c.get("/api/admin/metrics/prometheus",
+                             headers={"Authorization": "Bearer s3cr3t-scrape-token"})
+    finally:
+        app.dependency_overrides.clear()
+
+    body = r.text
+    assert 'nexora_channel_active{channel_key="ch-mon"} 1' in body
+    assert "TOP_SECRET_KEY" not in body
+    assert "stream_key" not in body
+    assert "source_url" not in body
+    # Never a per-subscriber or per-IP label.
+    assert "subscriber_id" not in body
+    assert "device_id" not in body

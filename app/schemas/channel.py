@@ -107,6 +107,30 @@ class ChannelPublic(BaseModel):
     requires_subscription: bool
 
 
+class ChannelPublicParental(ChannelPublic):
+    """ChannelPublic + the parental marker (NX-PARENTAL).
+
+    A SUBCLASS rather than an extra field on ChannelPublic, because the catalog
+    payload must stay byte-identical to today while PARENTAL_CONTROL_ENFORCE is
+    off — a new key in the JSON is a change, however additive it looks, and
+    tests/test_catalog_entitlements.py pins the exact key set. The route picks
+    the schema per request (see app/api/client/catalog.py).
+
+    A censored channel is LISTED, not hidden: hiding it leaves holes in the grid
+    and in the channel numbering for content the household is paying for, and
+    hiding is not a control anyway (ChannelService makes the same argument for
+    CATALOG_ENTITLEMENT_FILTER). The marker is what lets a client blur the tile
+    and prompt for the PIN.
+
+    Listing one leaks nothing playable: this schema inherits ChannelPublic's
+    fields and adds a boolean, so `stream_key` and `source_url` — the two values
+    that reconstruct a direct URL, see the module docstring — remain absent, and
+    `channel_key` alone plays nothing. The only route that turns a channel_key
+    into a playable token is /playback/*, which is where the gate is.
+    """
+    censored: bool
+
+
 class ChannelAdminOut(BaseModel):
     """Channel row for admin/reseller — listings AND detail. Never a raw secret.
 
