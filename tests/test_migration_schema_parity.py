@@ -127,20 +127,6 @@ _PG = postgresql.dialect()
 #
 # Keys are the stable divergence identifiers produced by `_diff_*` below.
 KNOWN_DIVERGENCES: dict[str, str] = {
-    # SAME BUG CLASS AS 005. app/models/plan.py:15 declares
-    # `String(128), unique=True` → an (unnamed) UNIQUE CONSTRAINT, while
-    # migrations/versions/001_initial_schema.py:77 creates
-    # `op.create_index("ix_plans_name", "plans", ["name"], unique=True)` → a
-    # unique INDEX. Uniqueness IS enforced either way, so no data corruption;
-    # it becomes a 500 the day any code does `ON CONFLICT ON CONSTRAINT` on
-    # plans.name, exactly as plan_channel_service.py does for plan_channels.
-    "unique_constraint.missing_in_db:plans:(name)":
-        "plans.name: ORM UniqueConstraint vs migration unique INDEX ix_plans_name "
-        "(001_initial_schema.py:77). Same class as the 005 bug. Owner: migrations/.",
-    "index.extra_in_db:plans:ix_plans_name":
-        "Other half of the same plans.name divergence: the unique index the "
-        "migration creates has no counterpart in the ORM.",
-
     # RESOLVED — audit_logs.user_agent (ORM TEXT vs migration VARCHAR(255),
     # 001_initial_schema.py:138) was the live login 500 this test surfaced. Fixed
     # by migrations/versions/009_audit_logs_user_agent_text.py, which alters the
@@ -152,23 +138,27 @@ KNOWN_DIVERGENCES: dict[str, str] = {
     # DDL. Deleted rather than kept: a stale entry silently stops guarding the
     # object, which is what test_no_stale_known_divergences exists to prevent.
 
-    # app/models/subscription.py:23 declares `starts_at ... index=True`; no
-    # migration ever creates ix_subscriptions_starts_at. Performance-only
-    # (no correctness impact), but it means an EXPLAIN measured against a
-    # test database does not describe production.
-    "index.missing_in_db:subscriptions:ix_subscriptions_starts_at":
-        "subscriptions.starts_at: ORM index=True, never created by any migration "
-        "(001_initial_schema.py:87). Performance-only. Owner: migrations/.",
+    # RESOLVED — plans.name (SAME BUG CLASS AS 005: ORM UniqueConstraint vs
+    # migration unique INDEX ix_plans_name, 001_initial_schema.py:77). Fixed by
+    # migrations/versions/010_fix_plans_name_constraint_and_subscriptions_
+    # starts_at_index.py, which drops the bare unique index and creates
+    # uq_plans_name as a real unique constraint, following 008's pattern
+    # (query pg_constraint/pg_indexes, cover all three starting states, drop
+    # index before adding constraint). Deleted rather than kept, same reason as
+    # audit_logs above.
+
+    # RESOLVED — ix_subscriptions_starts_at (ORM index=True on
+    # app/models/subscription.py:23, never created by any migration,
+    # 001_initial_schema.py:87). Fixed by the same 010 migration, which adds
+    # the missing (non-unique) index. Deleted rather than kept, same reason as
+    # audit_logs above.
 }
 
-#: Operation signatures `alembic check` reports for the same four divergences
+#: Operation signatures `alembic check` reports for the same divergence
 #: above. Kept separate from KNOWN_DIVERGENCES because alembic phrases them in
-#: its own vocabulary; both lists describe the same four bugs.
+#: its own vocabulary; both lists describe the same bug.
 KNOWN_ALEMBIC_CHECK_OPS = (
     "modify_type",       # audit_logs.user_agent VARCHAR(255) → Text
-    "remove_index",      # ix_plans_name
-    "add_constraint",    # plans.name UniqueConstraint
-    "add_index",         # ix_subscriptions_starts_at
 )
 
 
