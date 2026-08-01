@@ -7,13 +7,37 @@ _redis: aioredis.Redis | None = None
 
 
 async def get_redis() -> aioredis.Redis:
+    """Process-wide Redis client with an EXPLICITLY bounded pool.
+
+    The bound and the wait-vs-fail choice are configuration, not library
+    defaults — see REDIS_MAX_CONNECTIONS / REDIS_POOL_TIMEOUT_SECONDS in
+    app/config.py for the numbers and why they are what they are. Short version:
+    the previous unbounded `from_url` inherited whatever ceiling the installed
+    redis-py shipped (100 in the deployed 8.1.0), and that pool raises
+    MaxConnectionsError instead of queueing, so every op past the ceiling became
+    a 500 during a reconnect stampede.
+    """
     global _redis
     if _redis is None:
-        _redis = aioredis.from_url(
-            settings.redis_url,
-            encoding="utf-8",
-            decode_responses=True,
-        )
+        if settings.redis_pool_timeout_seconds > 0:
+            # Waits up to `timeout` for a free connection, then raises. Bursts
+            # become a few ms of latency instead of a wall of 500s.
+            pool = aioredis.BlockingConnectionPool.from_url(
+                settings.redis_url,
+                max_connections=settings.redis_max_connections,
+                timeout=settings.redis_pool_timeout_seconds,
+                encoding="utf-8",
+                decode_responses=True,
+            )
+            _redis = aioredis.Redis(connection_pool=pool)
+        else:
+            # Escape hatch: fail fast, but still bounded (never the library default).
+            _redis = aioredis.from_url(
+                settings.redis_url,
+                encoding="utf-8",
+                decode_responses=True,
+                max_connections=settings.redis_max_connections,
+            )
     return _redis
 
 
@@ -77,6 +101,22 @@ def key_client(token_jti: str) -> str:
 def key_client_refresh(token_jti: str) -> str:
     """Client (subscriber) refresh token. TTL = client_refresh_token_expire_days."""
     return f"nexora:client_refresh:{token_jti}"
+
+
+def key_parental_unlock(subscriber_id: str, device_id: str) -> str:
+    """Short-lived parental-PIN unlock grant (NX-PARENTAL).
+
+    Keyed by subscriber AND device on purpose: unlocking on the parent's phone
+    must not unlock the child's television. TTL = parental_pin_unlock_ttl_seconds,
+    renewed on each use (sliding window).
+
+    The failed-attempt counter and the lockout deliberately do NOT live here:
+    they reuse key_login_attempts/key_lockout with a `parental:{subscriber_id}`
+    identifier, which keeps one lockout implementation in the project and keeps
+    the namespace disjoint from the admin (`admin:{username}`) and legacy
+    (bare username) counters.
+    """
+    return f"nexora:parental_unlock:{subscriber_id}:{device_id}"
 
 
 def key_stream_grant(node: str, stream_key: str, ip_hash: str) -> str:
