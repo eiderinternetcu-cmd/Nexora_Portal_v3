@@ -2704,19 +2704,65 @@ button {
   backdrop-filter: blur(26px) saturate(1.45);
 }
 
-.pro-playback-error {
+.pro-playback-error-overlay {
   position: fixed;
-  top: calc(var(--pro-top-h) + 18px);
-  left: 50%;
-  z-index: 100;
-  max-width: min(86vw, 560px);
-  padding: 12px 16px;
-  border: 1px solid rgba(255, 93, 118, 0.36);
-  border-radius: 8px;
+  inset: 0;
+  z-index: 110;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(3, 4, 10, 0.78);
+  backdrop-filter: blur(14px);
+}
+
+.pro-playback-error-card {
+  max-width: 440px;
+  width: 100%;
+  padding: 28px 24px;
+  background: linear-gradient(180deg, rgba(32, 14, 28, 0.95), rgba(18, 9, 18, 0.95));
+  border: 1px solid rgba(255, 93, 118, 0.4);
+  border-radius: 16px;
+  text-align: center;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.65), 0 0 30px rgba(255, 93, 118, 0.15);
+}
+
+.error-card-icon {
+  color: #ff5d76;
+  margin-bottom: 14px;
+  filter: drop-shadow(0 0 12px rgba(255, 93, 118, 0.4));
+}
+
+.pro-playback-error-card h3 {
+  font-size: 18px;
+  font-weight: 700;
+  color: #ffffff;
+  margin: 0 0 10px 0;
+}
+
+.pro-playback-error-card p {
+  font-size: 14px;
+  line-height: 1.5;
   color: #ffd6dc;
-  background: rgba(40, 8, 18, 0.82);
-  transform: translateX(-50%);
-  backdrop-filter: blur(18px);
+  margin: 0 0 20px 0;
+}
+
+.error-retry-btn {
+  height: 44px;
+  padding: 0 24px;
+  background: linear-gradient(90deg, #ff5d76, #b82eff);
+  border: 0;
+  border-radius: 10px;
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.error-retry-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 16px rgba(255, 93, 118, 0.35);
 }
 
 .pro-now-playing {

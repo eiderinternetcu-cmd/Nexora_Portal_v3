@@ -1,5 +1,6 @@
 import { KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
+  AlertTriangle,
   ChevronLeft,
   Film,
   Grid2X2,
@@ -573,7 +574,25 @@ export function PlayerView({
         )}
 
         {playbackError && (
-          <div className="pro-playback-error">{playbackError}</div>
+          <div className="pro-playback-error-overlay">
+            <div className="pro-playback-error-card">
+              <AlertTriangle size={36} className="error-card-icon" />
+              <h3>Atención</h3>
+              <p>{playbackError}</p>
+              {current && (
+                <button
+                  type="button"
+                  className="error-retry-btn"
+                  onClick={() => {
+                    setPlaybackError("");
+                    void playChannel(current);
+                  }}
+                >
+                  Reintentar reproducción
+                </button>
+              )}
+            </div>
+          </div>
         )}
 
         <footer className="pro-now-playing">
