@@ -31,13 +31,15 @@ npx cap sync ios
 # 4. Abrir Xcode automáticamente en Mac
 echo ""
 echo "▶️  [3/3] Abriendo Xcode..."
-if command -v open &> /dev/null; then
+if [ -d "ios/App/App.xcworkspace" ]; then
     open ios/App/App.xcworkspace
-    echo ""
-    echo "================================================================="
-    echo "  ✅ ¡XCODE ABIERTO CON ÉXITO EN TU MAC!"
-    echo "  👉 Ve a: Product ➔ Archive ➔ Distribute App ➔ App Store Connect"
-    echo "================================================================="
+elif [ -d "ios/App/App.xcodeproj" ]; then
+    open ios/App/App.xcodeproj
 else
     npx cap open ios
 fi
+echo ""
+echo "================================================================="
+echo "  ✅ ¡XCODE ABIERTO CON ÉXITO EN TU MAC!"
+echo "  👉 Ve a: Product ➔ Archive ➔ Distribute App ➔ App Store Connect"
+echo "================================================================="
