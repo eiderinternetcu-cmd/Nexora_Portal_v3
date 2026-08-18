@@ -82,16 +82,33 @@ export function LoginView({ onLogin }: LoginViewProps) {
         mode === "password" ? secret : undefined,
         mode === "activation" ? secret : undefined,
       );
-      // If login succeeds and we are on password mode and device supports it, save creds
+      // If login succeeds and we are on password mode and device supports it
       if (mode === "password" && isBiometryAvailable) {
-        try {
-          await NativeBiometric.setCredentials({
-            username: username.trim(),
-            password: secret.trim(),
-            server: "nexora.login",
-          });
-        } catch (e) {
-          console.warn("Could not save biometric credentials", e);
+        if (!hasBiometrics) {
+          const wantsBiometrics = window.confirm(
+            "🔒 Inicio más rápido\n\n¿Te gustaría activar el acceso con huella o rostro para no tener que escribir tu contraseña la próxima vez?"
+          );
+          if (wantsBiometrics) {
+            try {
+              await NativeBiometric.setCredentials({
+                username: username.trim(),
+                password: secret.trim(),
+                server: "nexora.login",
+              });
+              setHasBiometrics(true);
+            } catch (e) {
+              console.warn("Could not save biometric credentials", e);
+            }
+          }
+        } else {
+          // Si ya lo tiene activo, actualizamos la contraseña por si acaso la cambió
+          try {
+            await NativeBiometric.setCredentials({
+              username: username.trim(),
+              password: secret.trim(),
+              server: "nexora.login",
+            });
+          } catch (e) {}
         }
       }
     } catch (err) {
