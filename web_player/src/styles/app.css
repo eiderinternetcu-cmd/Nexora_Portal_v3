@@ -254,6 +254,24 @@ button {
   background: transparent;
 }
 
+.password-toggle-btn {
+  background: transparent;
+  border: 0;
+  outline: 0;
+  padding: 6px;
+  margin-right: -4px;
+  cursor: pointer;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s ease;
+}
+
+.password-toggle-btn:hover {
+  color: #ffffff;
+}
+
 .primary-action {
   height: 48px;
   display: inline-flex;

@@ -34,13 +34,21 @@ export const extractApiMessage = (payload: unknown, fallback: string) => {
 
 export const messageForError = (error: unknown) => {
   if (error instanceof ApiError) {
-    if (error.status === 401) return "Sesion vencida. Inicia sesion otra vez.";
-    if (error.status === 403) return error.message || "Suscripcion no disponible.";
-    if (error.status === 409) return error.message || "Limite de conexiones alcanzado.";
-    if (error.status === 423) return "Cuenta bloqueada temporalmente por intentos fallidos.";
-    if (error.status === 429) return "Demasiados intentos. Espera un momento.";
+    if (error.status === 401) return "Usuario o contraseña incorrectos.";
+    if (error.status === 403) return error.message || "Suscripción no disponible o expirada.";
+    if (error.status === 404) return "Servicio no encontrado.";
+    if (error.status === 409) return error.message || "Límite de conexiones o dispositivos alcanzado.";
+    if (error.status === 423) return "Cuenta bloqueada temporalmente por seguridad.";
+    if (error.status === 429) return "Demasiados intentos seguidos. Espera un momento.";
+    if (error.status >= 500) return "Error temporal en el servidor. Intenta de nuevo en unos segundos.";
     return error.message;
   }
-  if (error instanceof Error) return error.message;
-  return "No se pudo completar la operacion.";
+  if (error instanceof Error) {
+    const msg = error.message.toLowerCase();
+    if (msg.includes("failed to fetch") || msg.includes("networkerror") || msg.includes("network request failed")) {
+      return "No se pudo conectar con el servidor. Verifica tu conexión a internet.";
+    }
+    return error.message;
+  }
+  return "Ocurrió un error inesperado al conectar.";
 };

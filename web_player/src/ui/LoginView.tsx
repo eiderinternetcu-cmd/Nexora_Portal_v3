@@ -1,5 +1,5 @@
 import { FormEvent, useMemo, useState } from "react";
-import { KeyRound, Lock, LogIn, UserRound } from "lucide-react";
+import { Eye, EyeOff, KeyRound, Lock, LogIn, UserRound } from "lucide-react";
 import { messageForError } from "../api/errors";
 import { NexoraBrand } from "./NexoraBrand";
 
@@ -11,6 +11,7 @@ export function LoginView({ onLogin }: LoginViewProps) {
   const [mode, setMode] = useState<"password" | "activation">("password");
   const [username, setUsername] = useState("");
   const [secret, setSecret] = useState("");
+  const [showSecret, setShowSecret] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -76,6 +77,7 @@ export function LoginView({ onLogin }: LoginViewProps) {
                 autoFocus
                 autoComplete="username"
                 value={username}
+                placeholder="Ingresa tu usuario"
                 onChange={(event) => setUsername(event.target.value)}
               />
             </div>
@@ -86,11 +88,24 @@ export function LoginView({ onLogin }: LoginViewProps) {
             <div className="field-input">
               {mode === "password" ? <Lock size={18} /> : <KeyRound size={18} />}
               <input
-                type={mode === "password" ? "password" : "text"}
+                type={mode === "password" ? (showSecret ? "text" : "password") : "text"}
                 autoComplete={mode === "password" ? "current-password" : "one-time-code"}
                 value={secret}
+                placeholder={mode === "password" ? "Ingresa tu contraseña" : "Ej: ACT-1234"}
                 onChange={(event) => setSecret(event.target.value)}
               />
+              {mode === "password" && (
+                <button
+                  type="button"
+                  className="password-toggle-btn"
+                  onClick={() => setShowSecret((prev) => !prev)}
+                  tabIndex={-1}
+                  title={showSecret ? "Ocultar contraseña" : "Ver contraseña"}
+                  aria-label={showSecret ? "Ocultar contraseña" : "Ver contraseña"}
+                >
+                  {showSecret ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              )}
             </div>
           </label>
 
