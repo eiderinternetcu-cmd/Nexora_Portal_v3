@@ -1,3 +1,4 @@
+import { Capacitor, CapacitorHttp } from "@capacitor/core";
 import type { AppConfig } from "./config";
 import { ApiError, extractApiMessage } from "./errors";
 import type {
@@ -201,12 +202,33 @@ export class NexoraClient {
       headers.set("Authorization", `Bearer ${session.accessToken}`);
     }
 
-    const response = await fetch(`${this.config.apiBaseUrl}${path}`, {
-      ...init,
-      headers,
-    });
+    const url = `${this.config.apiBaseUrl}${path}`;
+    let responseStatus: number;
+    let responseStatusText: string;
+    let responseText: string;
 
-    if (response.status === 401 && needsAuth && retryOnUnauthorized) {
+    if (Capacitor.isNativePlatform()) {
+      const response = await CapacitorHttp.request({
+        url,
+        method: init.method || "GET",
+        headers: Object.fromEntries(headers.entries()),
+        data: init.body ? JSON.parse(init.body as string) : undefined,
+      });
+      responseStatus = response.status;
+      responseStatusText = "OK";
+      // CapacitorHttp can return a JS object in response.data if content-type is json
+      responseText = typeof response.data === "string" ? response.data : JSON.stringify(response.data || "");
+    } else {
+      const response = await fetch(url, {
+        ...init,
+        headers,
+      });
+      responseStatus = response.status;
+      responseStatusText = response.statusText;
+      responseText = await response.text();
+    }
+
+    if (responseStatus === 401 && needsAuth && retryOnUnauthorized) {
       try {
         await this.refresh();
         return this.request<T>(path, init, {
@@ -219,14 +241,13 @@ export class NexoraClient {
       }
     }
 
-    if (response.status === 204) return undefined as T;
+    if (responseStatus === 204) return undefined as T;
 
-    const text = await response.text();
-    const payload = text ? safeJson(text) : undefined;
+    const payload = responseText ? safeJson(responseText) : undefined;
 
-    if (!response.ok) {
-      const message = extractApiMessage(payload, response.statusText);
-      throw new ApiError(response.status, message, payload);
+    if (responseStatus < 200 || responseStatus >= 300) {
+      const message = extractApiMessage(payload, responseStatusText);
+      throw new ApiError(responseStatus, message, payload);
     }
 
     return payload as T;
