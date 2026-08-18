@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-#  Nexora Portal v3 — Script de Inicio Local Rápido (Backend + Frontend)
+#  Nexora Portal v3 — Script de Inicio Local (Web Player + API)
 # ==============================================================================
 set -e
 
@@ -8,76 +8,70 @@ DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$DIR"
 
 echo "================================================================="
-echo "   🚀 INICIANDO NEXORA PORTAL v3 (LOCAL DEV)"
+echo "   🚀 INICIANDO NEXORA PLAY (DEV SERVER)"
 echo "================================================================="
 
-# 1. Verificar archivo .env en Backend
-if [ ! -f "$DIR/.env" ]; then
-    echo "⚠️  No se encontró .env en la raíz. Copiando desde .env.example..."
-    cp "$DIR/.env.example" "$DIR/.env"
-    echo "   ✓ Creado .env base."
-fi
-
-# 2. Entorno virtual de Python
-VENV_DIR="$DIR/venv"
-if [ ! -d "$VENV_DIR" ]; then
-    echo "📦 Creando entorno virtual de Python (venv)..."
-    python3 -m venv "$VENV_DIR"
-    echo "   Instalando dependencias en venv..."
-    "$VENV_DIR/bin/pip" install --upgrade pip
-    if [ -f "$DIR/requirements.txt" ]; then
-        "$VENV_DIR/bin/pip" install -r "$DIR/requirements.txt"
-    fi
-    echo "   ✓ Entorno virtual listo."
-fi
-
-PYTHON_EXEC="$VENV_DIR/bin/python"
-if [ ! -f "$PYTHON_EXEC" ]; then
-    PYTHON_EXEC="python3"
-fi
-
-# 3. Verificar dependencias de Frontend (web_player)
+# 1. Asegurar dependencias de Frontend (web_player)
 if [ ! -d "$DIR/web_player/node_modules" ]; then
     echo "📦 Instalando dependencias de Node.js en web_player..."
     (cd "$DIR/web_player" && npm install)
-    echo "   ✓ Dependencias de frontend instaladas."
+    echo "   ✓ Dependencias instaladas."
 fi
 
-# 4. Manejo de terminación limpia (Ctrl+C)
+# 2. Configurar entorno .env del Web Player apuntando a producción
+if [ ! -f "$DIR/web_player/.env" ]; then
+    echo "VITE_NEXORA_API_BASE_URL=https://nexoraplay.net" > "$DIR/web_player/.env"
+fi
+
+# 3. Manejo de terminación limpia (Ctrl+C)
 cleanup() {
     echo ""
-    echo "🛑 Deteniendo servicios de Nexora..."
-    if [ -n "$BACKEND_PID" ]; then
-        kill "$BACKEND_PID" 2>/dev/null || true
-    fi
+    echo "🛑 Deteniendo servicios..."
     if [ -n "$FRONTEND_PID" ]; then
         kill "$FRONTEND_PID" 2>/dev/null || true
     fi
-    echo "   ✓ Servicios detenidos correctamente."
+    if [ -n "$BACKEND_PID" ]; then
+        kill "$BACKEND_PID" 2>/dev/null || true
+    fi
     exit 0
 }
 trap cleanup SIGINT SIGTERM EXIT
 
-# 5. Iniciar Backend (FastAPI en puerto 8000)
-echo ""
-echo "▶️  Iniciando Backend FastAPI en http://localhost:8000..."
-"$PYTHON_EXEC" "$DIR/scripts/dev_server.py" --host 0.0.0.0 --port 8000 &
-BACKEND_PID=$!
+# 4. Verificar si existe Redis local para decidir si levantar backend local
+LOCAL_REDIS=0
+if nc -z 127.0.0.1 6379 2>/dev/null; then
+    LOCAL_REDIS=1
+fi
 
-# 6. Iniciar Frontend (Vite en puerto 5173)
-echo "▶️  Iniciando Web Player (Vite) en http://localhost:5173..."
+if [ "$LOCAL_REDIS" -eq 1 ]; then
+    VENV_DIR="$DIR/venv"
+    PYTHON_EXEC="$VENV_DIR/bin/python"
+    if [ ! -f "$PYTHON_EXEC" ]; then PYTHON_EXEC="python3"; fi
+
+    echo "▶️  Redis local detectado: Iniciando Backend FastAPI en http://localhost:8000..."
+    "$PYTHON_EXEC" "$DIR/scripts/dev_server.py" --host 0.0.0.0 --port 8000 &
+    BACKEND_PID=$!
+else
+    echo "☁️  Conectando Web Player al Backend en la nube (https://nexoraplay.net)..."
+fi
+
+# 5. Iniciar Web Player (Vite en puerto 5173)
+echo "▶️  Iniciando Web Player en http://localhost:5173..."
 (cd "$DIR/web_player" && npm run dev) &
 FRONTEND_PID=$!
 
 echo ""
 echo "================================================================="
-echo "  ✅ SERVICIOS EN EJECUCIÓN"
+echo "  ✅ SERVIDOR LISTO"
 echo "  🌐 Web Player:  http://localhost:5173"
-echo "  📄 Swagger API:  http://localhost:8000/docs"
-echo "  ⚡ Backend API:  http://localhost:8000"
+echo "  📱 Red Local:   http://192.168.18.253:5173"
+echo "  ☁️  Backend API: https://nexoraplay.net"
 echo "================================================================="
-echo "  Presiona [Ctrl + C] para detener ambos servicios."
+echo "  Presiona [Ctrl + C] para detener el servidor."
 echo "================================================================="
 
-# Esperar a que terminen los procesos
-wait $BACKEND_PID $FRONTEND_PID
+if [ -n "$BACKEND_PID" ]; then
+    wait $BACKEND_PID $FRONTEND_PID
+else
+    wait $FRONTEND_PID
+fi
