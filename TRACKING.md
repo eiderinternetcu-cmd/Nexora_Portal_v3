@@ -53,6 +53,10 @@ El objetivo principal de la sesión fue estabilizar la reproducción de los cana
 - **Modo Inmersivo (Fullscreen):** Se instalaron e integraron plugins nativos (`@capacitor/status-bar` y `@capawesome/capacitor-navigation-bar`). Ahora, al expandir el reproductor web, la app se comunica con el sistema operativo para ocultar la barra de estado (batería/hora) y los botones de navegación nativos del teléfono, logrando una experiencia inmersiva real.
 - **Safe-Area y Notch Overlap:** La configuración base de Capacitor renderizaba la app debajo de la cámara/notificaciones, impidiendo presionar los botones superiores. Se reconfiguró el núcleo (`capacitor.config.ts`) con `overlaysWebView: false` y paddings dinámicos, garantizando que el diseño respete las áreas seguras del hardware.
 - **Responsive Drawer:** Se ajustó la dimensión del menú de canales lateral (`drawer`) para teléfonos en posición vertical, reduciendo su ancho a un estándar táctil óptimo (`min(280px, 80vw)`) para no invadir completamente la pantalla.
+### 7. Material de Marketing y Tiendas (Versión 1.0.2)
+- **Generación Automatizada:** Se construyó un script de Playwright (`generar_capturas_store.js`) que renderiza la aplicación en dispositivos virtuales (iPhone 6.5", 6.7", iPad Pro, Android 412x915).
+- **Flujo Completo:** El script captura de forma precisa las pantallas de Login, Catálogo Principal y el Reproductor en vivo (mostrando canales de muestra como Golden Plus HD) respetando todos los márgenes dinámicos. Estas capturas cumplen con las medidas exactas exigidas por App Store Connect y Google Play Console.
+- **Versión:** El código del proyecto se subió a la versión `1.0.2` para marcar el final de la estabilización móvil.
 
 ---
 
