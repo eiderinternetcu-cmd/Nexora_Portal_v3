@@ -17,15 +17,12 @@ class NexoraStreamLoader extends Hls.DefaultConfig.loader {
     if (context && typeof context.url === "string") {
       let u = context.url;
       if (
-        u.includes("localhost/tracks-") ||
-        u.includes("localhost/stream/") ||
-        u.startsWith("https://localhost/") ||
-        u.startsWith("http://localhost/") ||
-        u.startsWith("capacitor://localhost/")
+        u.includes("localhost") ||
+        u.includes("capacitor://localhost")
       ) {
         u = u
-          .replace(/^https?:\/\/localhost\//, "https://nexoraplay.net/")
-          .replace(/^capacitor:\/\/localhost\//, "https://nexoraplay.net/");
+          .replace(/^https?:\/\/localhost(:\d+)?\//, "https://nexoraplay.net/")
+          .replace(/^capacitor:\/\/localhost(:\d+)?\//, "https://nexoraplay.net/");
       }
       context.url = u;
     }
@@ -50,7 +47,7 @@ export class HlsController {
     // Ensure source URL is 100% absolute
     const absoluteUrl = url.startsWith("/")
       ? `https://nexoraplay.net${url}`
-      : url.replace(/^https?:\/\/localhost\//, "https://nexoraplay.net/").replace(/^capacitor:\/\/localhost\//, "https://nexoraplay.net/");
+      : url.replace(/^https?:\/\/localhost(:\d+)?\//, "https://nexoraplay.net/").replace(/^capacitor:\/\/localhost(:\d+)?\//, "https://nexoraplay.net/");
 
     if (Hls.isSupported()) {
       this.hls = new Hls({
