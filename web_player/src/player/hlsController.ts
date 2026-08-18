@@ -28,9 +28,21 @@ export class HlsController {
 
     if (Hls.isSupported()) {
       this.hls = new Hls({
-        lowLatencyMode: true,
-        backBufferLength: 90,
-        liveDurationInfinity: true,
+        enableWorker: true,
+        lowLatencyMode: false,
+        backBufferLength: 30,
+        maxBufferLength: 20,
+        maxMaxBufferLength: 60,
+        maxBufferSize: 30 * 1000 * 1000,
+        liveSyncDurationCount: 3,
+        liveMaxLatencyDurationCount: 8,
+        manifestLoadingTimeOut: 12000,
+        manifestLoadingMaxRetry: 4,
+        levelLoadingTimeOut: 12000,
+        levelLoadingMaxRetry: 4,
+        fragLoadingTimeOut: 15000,
+        fragLoadingMaxRetry: 6,
+        startFragPrefetch: true,
       });
       this.hls.on(Hls.Events.ERROR, (_event, data) => {
         this._handleError(data);
