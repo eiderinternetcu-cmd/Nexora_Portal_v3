@@ -1,6 +1,6 @@
 # ROADMAP — Nexora API (lo que está PENDIENTE)
 
-_Actualizado: 2026-07-14 (M1 code-complete: PR #11)_
+_Actualizado: 2026-07-15 (M1 + M2 desplegados en prod, Alembic 007)_
 
 > Este documento lista **solo lo que falta**. Lo ya entregado está en `PROJECT_STATUS.md`.
 > Ordenado por dependencias reales, no por deseo. Alineado con `docs/nexora-best-of/12_ROADMAP_PRIORIZADO.md`
@@ -15,17 +15,18 @@ _Actualizado: 2026-07-14 (M1 code-complete: PR #11)_
 | Fases 1–3 (auth, Client API, catálogo, Flussonic, web player, multi-device) | ✅ |
 | Fase 4 · Bloque 0 (M3U real, 24→43 canales, multi-nodo) · Bloque 1 (observabilidad base, hls.js hardening) | ✅ |
 | Deploy producción `nexoraplay.net` (HTTPS, `/stream/*` same-origin, UFW lockdown) | ✅ |
-| Alembic **005** (`plan_channels`) + seed | ✅ |
-| **PROD-2A** `ENTITLEMENT_ENFORCE=true` (anti-IDOR por plan) | ✅ |
-| **PROD-2B** `JWT_REQUIRE_AUD=true` (iss/aud/type estrictos) | ✅ |
-| **PROD-2C** `SIGNED_URL_ENFORCE=true` + Nginx `auth_request` + grant Redis de segmentos | ✅ validado (13 min, 396/396 req, 0 fallos) |
-| **Argon2id** para hashing de passwords | ✅ ya implementado (`app/core/security.py`) |
-| **M1 device secret** (identidad fuerte, flag-gated) + **grant hardening** | ✅ código en PR #11, CI verde, Alembic **006** (no mergeado) |
+| **PROD-2A/2B/2C** (entitlement, jwt-aud, signed-url + Nginx `auth_request` + grant) | ✅ en prod (validado 13 min, 396/396 req) |
+| **Argon2id** para hashing de passwords | ✅ ya implementado |
+| **M1 — device secret (flag-gated) + grant hardening** | ✅ **desplegado en prod** (PRs #9-12, Alembic **006**) |
+| **NX-CONC — concurrencia atómica (Lua)** | ✅ **desplegado en prod** (PR #12) |
+| **M2 — métricas playback + auditoría inmutable (trigger append-only) + correlation-id** | ✅ **desplegado en prod** (PR #13, Alembic **007**) |
 
-**Hito M1 (playback seguro) está cerrado en código.** Lo único que falta para dar M1 por
-completo es **activar 2D (`PLAYBACK_IP_BINDING_MODE=soft`) en producción** (P0.1) — un flip de
-flag con autorización. El resto de M1 (entitlement, gate, signed-url, Argon2id, device secret,
-grant hardening) ya está entregado.
+**Prod: Alembic 007. M1 (~95%) y M2 (~90%) desplegados.** Estado por hito:
+- **M1** — solo falta activar **2D** (`PLAYBACK_IP_BINDING_MODE=soft`) en prod (P0.1).
+- **M2** — métricas, auditoría inmutable y correlation-id operativos; **alerting de nodos** limitado por topología (ver P0.5).
+- **M3+ / M4 / M5** — pendientes (secciones abajo).
+
+**% actual:** MVP streaming seguro+operable **~90%** · Visión completa OTT **~44%**.
 
 ---
 
@@ -45,17 +46,18 @@ Solo falta **activar el enforcement**, escalonado:
 - **Requiere autorización explícita por flag.** Rollback: quitar la línea de `.env.production` + recrear api.
 - _Referencia:_ `deploy/RUNBOOK_PRODUCTION_P0.md` · **AC:** misma IP → 200; otra IP → 200+WARN (soft) / 403 (strict).
 
-### P0.2 · Hardening del grant de segmentos — ✅ HECHO (PR #11, código; falta activar en prod)
-Resuelto en código (flag-gated, defaults que no cambian prod):
-1. **Latencia de revocación** → **`STREAM_GRANT_MAX_LIFETIME_SECONDS`** (default 0 = ilimitado/legacy): el grant guarda su seed epoch y muere al alcanzar el tope absoluto, sin importar la renovación. _Pendiente: definir el valor de prod (p. ej. 6 h) y activarlo._
-2. **Token expirado = 401 duro** → **`STREAM_GRANT_TOKEN_FALLBACK`** (default on): un token presente-pero-expirado cae a un grant válido del mismo node+stream+IP (continuidad). Ya activo por defecto.
-- Implementado en `app/services/stream_auth_service.py` + `app/api/internal/stream_auth.py`; 11 tests nuevos.
+### P0.2 · Hardening del grant — ✅ HECHO y DESPLEGADO (PR #11)
+Flag-gated, en prod con defaults que no cambian comportamiento:
+1. **`STREAM_GRANT_MAX_LIFETIME_SECONDS`** (default 0=ilimitado): tope absoluto de vida del grant. _Pendiente: definir/activar valor prod (p.ej. 6h)._
+2. **`STREAM_GRANT_TOKEN_FALLBACK`** (default on): token expirado cae a grant válido (continuidad). Activo.
 
-### P0.3 · Deuda de versionado — PRs abiertos (falta mergear)
-- **PR #9** `infra: version production auth_request gate` — versiona el `nexoraplay.conf` real de prod + runbook. Abierto, `MERGEABLE`.
-- **PR #10** `chore: repo housekeeping + pending-work roadmap` — `.dockerignore` versionado, docs de diseño, `.gitignore` endurecido, este ROADMAP. Abierto.
-- **PR #11** `feat(m1): device secret + grant hardening` — código de M1, CI verde, Alembic 006. Abierto.
-- Orden sugerido de merge: **#9 → #10 → #11** (sin conflictos entre sí). Tras mergear: consolidar los `.md` de raíz en `docs/` (actualizar las rutas que lee `mcp_server/server.py`).
+### P0.3 · Deuda de versionado — ✅ HECHO
+PRs #9/#10/#11/#12/#13/#14 **mergeados a main y desplegados a prod**. _Pendiente menor: consolidar los `.md` de raíz en `docs/` (actualizar rutas que lee `mcp_server/server.py`)._
+
+### P0.5 · Alerting de nodos (M2-B) — limitación de topología ⚠️
+El fix mgmt-URL (PR #14) está en prod, pero **el contenedor `api` no alcanza los orígenes Flussonic** (`181.78.246.211:8002`, `38.210.187.13:8002` → timeout/HTTP 000); solo **nginx (el edge)** tiene ruta (por eso el playback funciona). ⇒ el health-check de nodos **desde el backend no es viable**. Opciones (decisión pendiente):
+- **(a)** Monitor prueba vía **HLS firmado a través de nginx** (`http://nexora_nginx/stream/<node>/<stream>/index.m3u8?token=<minted>` → 200) — señal end-to-end real. **Recomendado.**
+- **(b)** Health-check en el edge/host. **(c)** Desactivar el monitor (flag) como stopgap. **(d)** Aceptar alertas "down".
 
 ### P0.4 · co-main caído (externo)
 El nodo Flussonic `co-main` (38.210.187.13) está **caído** → 4 canales sin servicio. Es una fuente externa.
