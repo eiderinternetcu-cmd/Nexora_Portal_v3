@@ -147,7 +147,7 @@ async function main() {
       const channelBtn = p2.locator(".channel-card, .channel-item, button").filter({ hasText: /TELENOSTALGIA/i }).first();
       if (await channelBtn.isVisible()) {
         await channelBtn.click();
-        await p2.waitForTimeout(800);
+        await p2.waitForTimeout(4000);
       }
     } catch {}
     await p2.screenshot({ path: path.join(ios65Dir, "03_reproductor_1284x2778.png") });
@@ -181,7 +181,7 @@ async function main() {
       const channelBtn = p2.locator(".channel-card, .channel-item, button").filter({ hasText: /TELENOSTALGIA/i }).first();
       if (await channelBtn.isVisible()) {
         await channelBtn.click();
-        await p2.waitForTimeout(800);
+        await p2.waitForTimeout(4000);
       }
     } catch {}
     await p2.screenshot({ path: path.join(ios67Dir, "03_reproductor_1290x2796.png") });
@@ -203,6 +203,16 @@ async function main() {
     await pIpadV.goto(url, { waitUntil: "networkidle" });
     await pIpadV.waitForTimeout(700);
     await pIpadV.screenshot({ path: path.join(ipadDir, "01_ipad_canales_2048x2732.png") });
+
+    try {
+      const channelBtn = pIpadV.locator(".channel-card, .channel-item, button").filter({ hasText: /TELENOSTALGIA/i }).first();
+      if (await channelBtn.isVisible()) {
+        await channelBtn.click();
+        await pIpadV.waitForTimeout(4000);
+      }
+    } catch {}
+    await pIpadV.screenshot({ path: path.join(ipadDir, "03_ipad_reproductor_2048x2732.png") });
+
     await contextV.close();
 
     const contextH = await browser.newContext({
@@ -216,6 +226,16 @@ async function main() {
     await pIpadH.goto(url, { waitUntil: "networkidle" });
     await pIpadH.waitForTimeout(700);
     await pIpadH.screenshot({ path: path.join(ipadDir, "02_ipad_horizontal_2732x2048.png") });
+
+    try {
+      const channelBtn = pIpadH.locator(".channel-card, .channel-item, button").filter({ hasText: /TELENOSTALGIA/i }).first();
+      if (await channelBtn.isVisible()) {
+        await channelBtn.click();
+        await pIpadH.waitForTimeout(4000);
+      }
+    } catch {}
+    await pIpadH.screenshot({ path: path.join(ipadDir, "04_ipad_horizontal_reproductor_2732x2048.png") });
+
     await contextH.close();
   }
 
@@ -239,6 +259,16 @@ async function main() {
     await p2.goto(url, { waitUntil: "networkidle" });
     await p2.waitForTimeout(600);
     await p2.screenshot({ path: path.join(gplayDir, "02_phone_canales_1080x2400.png") });
+
+    try {
+      const channelBtn = p2.locator(".channel-card, .channel-item, button").filter({ hasText: /TELENOSTALGIA/i }).first();
+      if (await channelBtn.isVisible()) {
+        await channelBtn.click();
+        await p2.waitForTimeout(4000);
+      }
+    } catch {}
+    await p2.screenshot({ path: path.join(gplayDir, "03_phone_reproductor_1080x2400.png") });
+
     await context.close();
   }
 

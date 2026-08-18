@@ -13,6 +13,8 @@
     "@capacitor/cli": "^8.5.0",
     "@capacitor/core": "^8.5.0",
     "@capacitor/ios": "^8.5.0",
+    "@capacitor/status-bar": "^8.0.3",
+    "@capawesome/capacitor-navigation-bar": "^8.0.1",
     "@capgo/capacitor-native-biometric": "^8.6.6",
     "@vitejs/plugin-react": "^5.0.0",
     "hls.js": "^1.6.0",

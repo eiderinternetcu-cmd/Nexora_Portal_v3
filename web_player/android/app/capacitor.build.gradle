@@ -9,6 +9,8 @@ android {
 
 apply from: "../capacitor-cordova-android-plugins/cordova.variables.gradle"
 dependencies {
+    implementation project(':capacitor-status-bar')
+    implementation project(':capawesome-capacitor-navigation-bar')
     implementation project(':capgo-capacitor-native-biometric')
 
 }

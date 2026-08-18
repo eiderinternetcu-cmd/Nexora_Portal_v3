@@ -27,6 +27,9 @@ import { HeartbeatRunner } from "../heartbeat/heartbeatRunner";
 import { HlsController } from "../player/hlsController";
 import { buildPlaybackUrl } from "../player/playbackUrl";
 import type { ToastTone } from "./ToastHost";
+import { Capacitor } from "@capacitor/core";
+import { StatusBar } from "@capacitor/status-bar";
+import { NavigationBar } from "@capawesome/capacitor-navigation-bar";
 
 type PlayerViewProps = {
   client: NexoraClient;
@@ -307,10 +310,26 @@ export function PlayerView({
   }
 
   async function toggleFullscreen() {
-    if (!document.fullscreenElement) {
-      await rootRef.current?.requestFullscreen();
+    if (!fullscreen) {
+      if (Capacitor.isNativePlatform()) {
+        try {
+          await StatusBar.hide();
+          await NavigationBar.hide();
+        } catch (e) {}
+        setFullscreen(true);
+      } else {
+        await rootRef.current?.requestFullscreen();
+      }
     } else {
-      await document.exitFullscreen();
+      if (Capacitor.isNativePlatform()) {
+        try {
+          await StatusBar.show();
+          await NavigationBar.show();
+        } catch (e) {}
+        setFullscreen(false);
+      } else {
+        await document.exitFullscreen();
+      }
     }
   }
 
