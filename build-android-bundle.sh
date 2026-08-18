@@ -22,10 +22,9 @@ echo "================================================================="
 echo "   📦 COMPILANDO BUNDLE PARA GOOGLE PLAY STORE (.AAB)"
 echo "================================================================="
 
-# 1. Compilar web en modo producción
-echo "▶️  [1/4] Compilando frontend web de producción..."
+echo "▶️  [1/4] Compilando frontend web de producción con API https://nexoraplay.net..."
 cd "$WEB_DIR"
-npm run build
+VITE_NEXORA_API_BASE_URL="https://nexoraplay.net" npm run build
 
 # 2. Sincronizar con Capacitor Android
 echo ""

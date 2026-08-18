@@ -38,13 +38,13 @@ LOCAL_IP=$(ip route get 1.1.1.1 2>/dev/null | awk '{print $7}' | head -n 1)
 if [ -z "$LOCAL_IP" ]; then
     LOCAL_IP="192.168.18.253"
 fi
-echo "   ✓ Conectando APK a Backend en: http://$LOCAL_IP:8000"
+echo "   ✓ Conectando APK a Backend oficial: https://nexoraplay.net"
 
 # 3. Compilar bundle web
 echo ""
 echo "▶️  [1/3] Compilando frontend Web Player..."
 cd "$WEB_DIR"
-VITE_NEXORA_API_BASE_URL="http://$LOCAL_IP:8000" npm run build
+VITE_NEXORA_API_BASE_URL="https://nexoraplay.net" npm run build
 
 # 4. Sincronizar con Capacitor Android
 echo ""
