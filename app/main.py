@@ -114,6 +114,11 @@ _WEB_ORIGINS = [
     "http://172.27.99.151:5173",
     "http://localhost:4173",
     "http://127.0.0.1:4173",
+    "http://localhost",
+    "https://localhost",
+    "capacitor://localhost",
+    "https://nexoraplay.net",
+    "https://www.nexoraplay.net",
 ]
 
 app.add_middleware(
