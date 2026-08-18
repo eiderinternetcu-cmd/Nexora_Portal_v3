@@ -6,7 +6,14 @@ export const buildPlaybackUrl = (
   channel: Channel,
   playback: PlaybackResponse,
 ) => {
-  if (playback.playback_url) return playback.playback_url;
+  if (playback.playback_url) {
+    if (playback.playback_url.startsWith("http://") || playback.playback_url.startsWith("https://")) {
+      return playback.playback_url;
+    }
+    const base = (config.apiBaseUrl || "https://nexoraplay.net").replace(/\/+$/, "");
+    const path = playback.playback_url.startsWith("/") ? playback.playback_url : `/${playback.playback_url}`;
+    return `${base}${path}`;
+  }
 
   const template = config.playbackUrlTemplate;
   if (!template) {
