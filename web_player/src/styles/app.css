@@ -50,6 +50,8 @@ button {
   inset: 0;
   overflow: hidden;
   background: #010101;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 .bg-layer {
@@ -2982,10 +2984,10 @@ button {
 
 @media (max-width: 920px) {
   .player-pro {
-    --pro-top-h: 60px;
-    --pro-bottom-h: 70px;
+    --pro-top-h: 64px;
+    --pro-bottom-h: 120px;
     --pro-rail: 74px;
-    --pro-drawer: min(328px, 88vw);
+    --pro-drawer: min(280px, 80vw);
   }
 
   .pro-nav,
