@@ -12,27 +12,6 @@ export type HlsCallbacks = {
   onRecovered?: () => void;
 };
 
-class NexoraStreamLoader extends Hls.DefaultConfig.loader {
-  override load(context: any, config: any, callbacks: any) {
-    if (context && typeof context.url === "string") {
-      let u = context.url;
-      if (
-        u.includes("localhost/tracks-") ||
-        u.includes("localhost/stream/") ||
-        u.startsWith("https://localhost/") ||
-        u.startsWith("http://localhost/") ||
-        u.startsWith("capacitor://localhost/")
-      ) {
-        u = u
-          .replace(/^https?:\/\/localhost\//, "https://nexoraplay.net/")
-          .replace(/^capacitor:\/\/localhost\//, "https://nexoraplay.net/");
-      }
-      context.url = u;
-    }
-    super.load(context, config, callbacks);
-  }
-}
-
 export class HlsController {
   private hls: Hls | null = null;
   private mediaRecoveryAttempted = false;
@@ -54,8 +33,6 @@ export class HlsController {
 
     if (Hls.isSupported()) {
       this.hls = new Hls({
-        pLoader: NexoraStreamLoader as any,
-        fLoader: NexoraStreamLoader as any,
         enableWorker: true,
         lowLatencyMode: false,
         backBufferLength: 30,

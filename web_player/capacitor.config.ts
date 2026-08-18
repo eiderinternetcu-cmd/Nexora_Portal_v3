@@ -4,13 +4,9 @@ const config: CapacitorConfig = {
   appId: 'com.nexora.play',
   appName: 'Nexora Play',
   webDir: 'dist',
-  plugins: {
-    CapacitorHttp: {
-      enabled: true,
-    },
-  },
   server: {
     androidScheme: 'https',
+    hostname: 'nexoraplay.net',
     cleartext: true,
   },
 };
