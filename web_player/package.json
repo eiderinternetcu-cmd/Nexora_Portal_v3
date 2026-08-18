@@ -13,6 +13,7 @@
     "@capacitor/cli": "^8.5.0",
     "@capacitor/core": "^8.5.0",
     "@capacitor/ios": "^8.5.0",
+    "@capgo/capacitor-native-biometric": "^8.6.6",
     "@vitejs/plugin-react": "^5.0.0",
     "hls.js": "^1.6.0",
     "lucide-react": "^0.468.0",

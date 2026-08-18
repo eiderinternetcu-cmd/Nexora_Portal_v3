@@ -1,7 +1,9 @@
-import { FormEvent, useMemo, useState } from "react";
-import { Eye, EyeOff, KeyRound, Lock, LogIn, UserRound } from "lucide-react";
+import { FormEvent, useMemo, useState, useEffect } from "react";
+import { Eye, EyeOff, KeyRound, Lock, LogIn, UserRound, Fingerprint } from "lucide-react";
 import { messageForError } from "../api/errors";
 import { NexoraBrand } from "./NexoraBrand";
+import { Capacitor } from "@capacitor/core";
+import { NativeBiometric } from "@capgo/capacitor-native-biometric";
 
 type LoginViewProps = {
   onLogin: (username: string, password?: string, activationCode?: string) => Promise<void>;
@@ -14,6 +16,55 @@ export function LoginView({ onLogin }: LoginViewProps) {
   const [showSecret, setShowSecret] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [hasBiometrics, setHasBiometrics] = useState(false);
+  const [isBiometryAvailable, setIsBiometryAvailable] = useState(false);
+
+  useEffect(() => {
+    const checkBiometrics = async () => {
+      if (!Capacitor.isNativePlatform()) return;
+      try {
+        const available = await NativeBiometric.isAvailable();
+        if (available.isAvailable) {
+          setIsBiometryAvailable(true);
+          try {
+            const creds = await NativeBiometric.getCredentials({ server: "nexora.login" });
+            if (creds && creds.username && creds.password) {
+              setHasBiometrics(true);
+            }
+          } catch {
+            // No credentials saved yet
+          }
+        }
+      } catch (err) {
+        console.warn("Biometrics check failed", err);
+      }
+    };
+    checkBiometrics();
+  }, []);
+
+  const loginWithBiometrics = async () => {
+    if (loading) return;
+    setLoading(true);
+    setError("");
+    try {
+      await NativeBiometric.verifyIdentity({
+        reason: "Inicia sesión rápidamente con tu huella o rostro",
+        title: "Nexora Play",
+        subtitle: "Inicio de sesión",
+        description: "Usa biometría para entrar a Nexora",
+      });
+      const creds = await NativeBiometric.getCredentials({ server: "nexora.login" });
+      await onLogin(creds.username, creds.password, undefined);
+    } catch (err) {
+      if (String(err).includes("User cancelled") || String(err).includes("cancelado")) {
+        // Just ignore cancellations
+      } else {
+        setError("La validación biométrica falló o fue cancelada.");
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const canSubmit = useMemo(
     () => username.trim().length > 0 && secret.trim().length > 0 && !loading,
@@ -31,6 +82,18 @@ export function LoginView({ onLogin }: LoginViewProps) {
         mode === "password" ? secret : undefined,
         mode === "activation" ? secret : undefined,
       );
+      // If login succeeds and we are on password mode and device supports it, save creds
+      if (mode === "password" && isBiometryAvailable) {
+        try {
+          await NativeBiometric.setCredentials({
+            username: username.trim(),
+            password: secret.trim(),
+            server: "nexora.login",
+          });
+        } catch (e) {
+          console.warn("Could not save biometric credentials", e);
+        }
+      }
     } catch (err) {
       setError(messageForError(err));
     } finally {
@@ -111,10 +174,37 @@ export function LoginView({ onLogin }: LoginViewProps) {
 
           {error && <div className="inline-error">{error}</div>}
 
-          <button className="primary-action" type="submit" disabled={!canSubmit}>
-            <LogIn size={18} />
-            <span>{loading ? "Conectando" : "Entrar"}</span>
-          </button>
+          <div style={{ display: "flex", gap: "10px", marginTop: "1rem" }}>
+            <button className="primary-action" style={{ flex: 1 }} type="submit" disabled={!canSubmit}>
+              <LogIn size={18} />
+              <span>{loading ? "Conectando" : "Entrar"}</span>
+            </button>
+            
+            {hasBiometrics && (
+              <button
+                type="button"
+                className="secondary-action"
+                style={{
+                  padding: "0 1.5rem",
+                  background: "var(--surface-sunken)",
+                  border: "1px solid var(--border-base)",
+                  borderRadius: "var(--radius-md)",
+                  color: "var(--text-bright)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  cursor: "pointer",
+                  transition: "background 0.2s"
+                }}
+                onClick={loginWithBiometrics}
+                disabled={loading}
+                title="Iniciar sesión con huella"
+                aria-label="Iniciar sesión con huella"
+              >
+                <Fingerprint size={24} />
+              </button>
+            )}
+          </div>
         </form>
       </section>
     </main>
