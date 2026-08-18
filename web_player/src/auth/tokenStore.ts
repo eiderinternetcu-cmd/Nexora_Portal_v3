@@ -54,4 +54,8 @@ export class TokenStore {
     localStorage.setItem(DEVICE_KEY, next);
     return next;
   }
+
+  setDeviceId(id: string) {
+    localStorage.setItem(DEVICE_KEY, id);
+  }
 }

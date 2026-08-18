@@ -16,6 +16,7 @@ export type ClientTokenResponse = {
   token_type: string;
   expires_in: number;
   subscriber_id: string;
+  device_registration?: string;
 };
 
 export type ClientProfile = {

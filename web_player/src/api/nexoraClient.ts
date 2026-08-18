@@ -33,6 +33,10 @@ export class NexoraClient {
     return this.store.getDeviceId();
   }
 
+  async getDevices() {
+    return this.request<Array<{ id: string; device_id: string; is_blocked: boolean }>>("/api/client/profile/devices");
+  }
+
   async login(input: LoginInput) {
     const payload: ClientLoginPayload = {
       username: input.username.trim(),
@@ -52,6 +56,18 @@ export class NexoraClient {
       { auth: false },
     );
     this.store.save(token);
+
+    if (token.device_registration === "limit_reached") {
+      try {
+        const devices = await this.getDevices();
+        const activeDev = devices.find((d) => !d.is_blocked && d.device_id);
+        if (activeDev) {
+          this.store.setDeviceId(activeDev.device_id);
+        }
+      } catch {
+        // ignore fallback error
+      }
+    }
     return token;
   }
 
@@ -111,13 +127,35 @@ export class NexoraClient {
   }
 
   async authorizePlayback(channelKey: string) {
-    return this.request<PlaybackResponse>("/api/client/playback/authorize", {
-      method: "POST",
-      body: JSON.stringify({
-        device_id: this.store.getDeviceId(),
-        channel_id: channelKey,
-      }),
-    });
+    try {
+      return await this.request<PlaybackResponse>("/api/client/playback/authorize", {
+        method: "POST",
+        body: JSON.stringify({
+          device_id: this.store.getDeviceId(),
+          channel_id: channelKey,
+        }),
+      });
+    } catch (err) {
+      if (err instanceof ApiError && String(err.message).includes("DEVICE_NOT_REGISTERED")) {
+        try {
+          const devices = await this.getDevices();
+          const activeDev = devices.find((d) => !d.is_blocked && d.device_id);
+          if (activeDev && activeDev.device_id !== this.store.getDeviceId()) {
+            this.store.setDeviceId(activeDev.device_id);
+            return await this.request<PlaybackResponse>("/api/client/playback/authorize", {
+              method: "POST",
+              body: JSON.stringify({
+                device_id: activeDev.device_id,
+                channel_id: channelKey,
+              }),
+            });
+          }
+        } catch {
+          // ignore
+        }
+      }
+      throw err;
+    }
   }
 
   async reissuePlayback(channelKey: string) {

@@ -1,4 +1,4 @@
-import { chromium, devices } from "playwright";
+import { chromium } from "playwright";
 import { createServer } from "vite";
 import path from "path";
 import fs from "fs";
@@ -7,19 +7,22 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const webPlayerDir = __dirname;
-const outputDir = "/home/brgo-solventyc/Escritorio/nexora_img";
+const baseOut = "/home/brgo-solventyc/Escritorio/nexora_img";
 
-if (!fs.existsSync(outputDir)) {
-  fs.mkdirSync(outputDir, { recursive: true });
-}
+const ios65Dir = path.join(baseOut, "App_Store_iPhone_6.5_Pulgadas");
+const ios67Dir = path.join(baseOut, "App_Store_iPhone_6.7_Pulgadas");
+const ipadDir  = path.join(baseOut, "App_Store_iPad_12.9_Pulgadas");
+const gplayDir = path.join(baseOut, "Google_Play_Store");
+
+[baseOut, ios65Dir, ios67Dir, ipadDir, gplayDir].forEach((dir) => {
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+});
 
 console.log("=================================================");
-console.log("📸 GENERADOR DE CAPTURAS MÓVILES (PLAYWRIGHT)");
-console.log(`📁 Carpeta destino: ${outputDir}`);
+console.log("📸 GENERANDO CAPTURAS CON DIMENSIONES EXACTAS APPLE");
 console.log("=================================================");
 
 async function main() {
-  console.log("▶️  Iniciando servidor de desarrollo Vite...");
   const server = await createServer({
     root: webPlayerDir,
     server: { port: 5179, host: "127.0.0.1" },
@@ -84,127 +87,89 @@ async function main() {
     }
   }
 
-  // --- 1. GOOGLE PLAY PHONE — MÓVIL REAL (1080 x 2400 escalado mobile) ---
-  console.log("📱 [1/7] Generando capturas para Google Play Teléfono (Vista móvil nativa)...");
+  // --- 1. IPHONE 6.5" (EXACTO: 1284 x 2778 px) ---
+  console.log("📱 [1/4] Generando iPhone 6.5\" (1284 x 2778)...");
   {
     const context = await browser.newContext({
-      viewport: { width: 412, height: 915 },
-      deviceScaleFactor: 2.625, // Genera imagen de 1081 x 2401 px nítida
+      viewport: { width: 428, height: 926 },
+      deviceScaleFactor: 3, // 428*3 = 1284, 926*3 = 2778
       isMobile: true,
       hasTouch: true,
     });
     const page = await context.newPage();
     await injectMockState(page, "login");
     await page.goto(url, { waitUntil: "networkidle" });
-    await page.waitForTimeout(600);
-    await page.screenshot({ path: path.join(outputDir, "01_google_play_phone_login.png") });
+    await page.waitForTimeout(500);
+    await page.screenshot({ path: path.join(ios65Dir, "01_login_1284x2778.png") });
 
     const pageHome = await context.newPage();
     await injectMockState(pageHome, "home");
     await pageHome.goto(url, { waitUntil: "networkidle" });
-    await pageHome.waitForTimeout(600);
-    await pageHome.screenshot({ path: path.join(outputDir, "02_google_play_phone_canales.png") });
+    await pageHome.waitForTimeout(500);
+    await pageHome.screenshot({ path: path.join(ios65Dir, "02_canales_1284x2778.png") });
     await context.close();
   }
 
-  // --- 2. GOOGLE PLAY ANDROID TV (1920 x 1080) ---
-  console.log("📺 [2/7] Generando capturas para Android TV (1920x1080)...");
-  {
-    const context = await browser.newContext({
-      viewport: { width: 1920, height: 1080 },
-      deviceScaleFactor: 1,
-    });
-    const page = await context.newPage();
-    await injectMockState(page, "home");
-    await page.goto(url, { waitUntil: "networkidle" });
-    await page.waitForTimeout(600);
-    await page.screenshot({ path: path.join(outputDir, "03_google_play_android_tv_guia.png") });
-    await context.close();
-  }
-
-  // --- 3. GOOGLE PLAY TABLET 10" (2560 x 1600) ---
-  console.log("📱 [3/7] Generando capturas para Tablet 10\"...");
-  {
-    const context = await browser.newContext({
-      viewport: { width: 1280, height: 800 },
-      deviceScaleFactor: 2,
-      isMobile: true,
-      hasTouch: true,
-    });
-    const page = await context.newPage();
-    await injectMockState(page, "home");
-    await page.goto(url, { waitUntil: "networkidle" });
-    await page.waitForTimeout(600);
-    await page.screenshot({ path: path.join(outputDir, "05_google_play_tablet_10in.png") });
-    await context.close();
-  }
-
-  // --- 4. APPLE APP STORE - IPHONE 6.7" (1290 x 2796) ---
-  console.log("🍎 [4/7] Generando capturas para iPhone 6.7\" (Mobile Nativo)...");
+  // --- 2. IPHONE 6.7" (EXACTO: 1290 x 2796 px) ---
+  console.log("📱 [2/4] Generando iPhone 6.7\" (1290 x 2796)...");
   {
     const context = await browser.newContext({
       viewport: { width: 430, height: 932 },
-      deviceScaleFactor: 3, // Genera 1290 x 2796 px exactos
+      deviceScaleFactor: 3, // 430*3 = 1290, 932*3 = 2796
       isMobile: true,
       hasTouch: true,
     });
     const page = await context.newPage();
     await injectMockState(page, "login");
     await page.goto(url, { waitUntil: "networkidle" });
-    await page.waitForTimeout(600);
-    await page.screenshot({ path: path.join(outputDir, "06_app_store_iphone_login.png") });
+    await page.waitForTimeout(500);
+    await page.screenshot({ path: path.join(ios67Dir, "01_login_1290x2796.png") });
 
     const pageHome = await context.newPage();
     await injectMockState(pageHome, "home");
     await pageHome.goto(url, { waitUntil: "networkidle" });
-    await pageHome.waitForTimeout(600);
-    await pageHome.screenshot({ path: path.join(outputDir, "07_app_store_iphone_canales.png") });
+    await pageHome.waitForTimeout(500);
+    await pageHome.screenshot({ path: path.join(ios67Dir, "02_canales_1290x2796.png") });
     await context.close();
   }
 
-  // --- 5. APPLE APP STORE - IPAD PRO (2048 x 2732) ---
-  console.log("🍎 [5/7] Generando capturas para iPad Pro 12.9\"...");
+  // --- 3. IPAD PRO 12.9" (EXACTO: 2048 x 2732 px) ---
+  console.log("📱 [3/4] Generando iPad Pro 12.9\" (2048 x 2732)...");
   {
     const context = await browser.newContext({
       viewport: { width: 1024, height: 1366 },
-      deviceScaleFactor: 2,
+      deviceScaleFactor: 2, // 1024*2 = 2048, 1366*2 = 2732
       isMobile: true,
       hasTouch: true,
     });
     const page = await context.newPage();
     await injectMockState(page, "home");
     await page.goto(url, { waitUntil: "networkidle" });
-    await page.waitForTimeout(600);
-    await page.screenshot({ path: path.join(outputDir, "08_app_store_ipad_pro.png") });
+    await page.waitForTimeout(500);
+    await page.screenshot({ path: path.join(ipadDir, "01_ipad_canales_2048x2732.png") });
     await context.close();
   }
 
-  // --- 6. FEATURE GRAPHIC / BANNER (1024 x 500) ---
-  console.log("🎨 [6/7] Generando Banner Google Play (1024x500)...");
+  // --- 4. GOOGLE PLAY PHONE (1080 x 2400) & TV (1920 x 1080) ---
+  console.log("🤖 [4/4] Generando Google Play Store...");
   {
     const context = await browser.newContext({
-      viewport: { width: 1024, height: 500 },
-      deviceScaleFactor: 1,
+      viewport: { width: 412, height: 915 },
+      deviceScaleFactor: 2.625,
+      isMobile: true,
+      hasTouch: true,
     });
     const page = await context.newPage();
-    await injectMockState(page, "home");
+    await injectMockState(page, "login");
     await page.goto(url, { waitUntil: "networkidle" });
-    await page.waitForTimeout(600);
-    await page.screenshot({ path: path.join(outputDir, "09_feature_graphic_1024x500.png") });
-    await context.close();
-  }
+    await page.waitForTimeout(500);
+    await page.screenshot({ path: path.join(gplayDir, "01_phone_login_1080x2400.png") });
 
-  // --- 7. APP ICON (512 x 512) ---
-  console.log("🎨 [7/7] Generando Icono de la App (512x512)...");
-  {
-    const context = await browser.newContext({
-      viewport: { width: 512, height: 512 },
-      deviceScaleFactor: 1,
-    });
-    const page = await context.newPage();
-    await page.goto(url, { waitUntil: "networkidle" });
-    await page.waitForTimeout(400);
-    await page.screenshot({ path: path.join(outputDir, "10_app_icon_512x512.png") });
+    const pageHome = await context.newPage();
+    await injectMockState(pageHome, "home");
+    await pageHome.goto(url, { waitUntil: "networkidle" });
+    await pageHome.waitForTimeout(500);
+    await pageHome.screenshot({ path: path.join(gplayDir, "02_phone_canales_1080x2400.png") });
     await context.close();
   }
 
@@ -212,8 +177,8 @@ async function main() {
   await server.close();
 
   console.log("=================================================");
-  console.log("✅ ¡CAPTURAS MÓVILES REGENERADAS CON ÉXITO!");
-  console.log(`📁 Revisa la carpeta: ${outputDir}`);
+  console.log("✅ ¡CAPTURAS EXACTAS GENERADAS EN CARPETAS INDIVIDUALES!");
+  console.log(`📁 Revisa: ${baseOut}`);
   console.log("=================================================");
 }
 
