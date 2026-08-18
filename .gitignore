@@ -27,3 +27,14 @@ venv/
 # Deploy scripts con rutas/info del servidor
 mcp_server/_check_build.py
 .ssh_known_hosts
+
+# Mobile & Releases
+release_builds/
+*.tsbuildinfo
+web_player/android/.gradle/
+web_player/android/app/build/
+web_player/android/local.properties
+web_player/ios/App/Pods/
+web_player/ios/App/build/
+web_player/vite.config.d.ts
+web_player/vite.config.js

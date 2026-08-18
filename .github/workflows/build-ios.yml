@@ -1,0 +1,44 @@
+name: Build and Archive iOS App (App Store)
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-ios:
+    name: Build iOS IPA
+    runs-on: macos-14
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: web_player/package-lock.json
+
+      - name: Install dependencies and build web
+        run: |
+          cd web_player
+          npm ci
+          npm run build
+
+      - name: Sync Capacitor iOS
+        run: |
+          cd web_player
+          npx cap sync ios
+
+      - name: Build Xcode Workspace
+        run: |
+          cd web_player/ios/App
+          xcodebuild -workspace App.xcworkspace -scheme App -destination generic/platform=iOS clean build CODE_SIGNING_ALLOWED=NO
+
+      - name: Upload iOS Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NexoraPlay-iOS-Build
+          path: web_player/ios/App/build
