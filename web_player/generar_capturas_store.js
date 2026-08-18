@@ -69,9 +69,13 @@ async function main() {
       })
     );
 
-    await page.route("**/api/client/profile", (route) =>
-      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(mockProfile) })
-    );
+    await page.route("**/api/client/profile", (route) => {
+      if (state === "login") {
+        route.fulfill({ status: 401, contentType: "application/json", body: '{"error":"unauthorized"}' });
+      } else {
+        route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(mockProfile) });
+      }
+    });
 
     await page.route("**/api/client/profile/devices", (route) =>
       route.fulfill({
@@ -144,11 +148,25 @@ async function main() {
 
     // Reproductor en vivo
     try {
-      const channelBtn = p2.locator(".channel-card, .channel-item, button").filter({ hasText: /TELENOSTALGIA/i }).first();
-      if (await channelBtn.isVisible()) {
-        await channelBtn.click();
-        await p2.waitForTimeout(4000);
+      // 1. Click "Canales en Vivo" on the HomeView to open PlayerView
+      const openLiveBtn = p2.locator("button.launcher-feature, button.launcher-play").filter({ hasText: /Canales en Vivo/i }).first();
+      if (await openLiveBtn.isVisible()) {
+        await openLiveBtn.click();
+        await p2.waitForTimeout(1000);
+      } else {
+        const playBtn = p2.locator("button.launcher-play").first();
+        if (await playBtn.isVisible()) await playBtn.click();
+        await p2.waitForTimeout(1000);
       }
+
+      // 2. Now we are in PlayerView. The sidebar might be hidden on mobile.
+      // We can force-open the dock or just evaluate JS to play the channel.
+      await p2.evaluate(() => {
+        // Find the first channel button in the DOM and click it, even if hidden
+        const btn = Array.from(document.querySelectorAll("button")).find(b => b.textContent.includes("GOLDEN PLUS HD"));
+        if (btn) btn.click();
+      });
+      await p2.waitForTimeout(4000);
     } catch {}
     await p2.screenshot({ path: path.join(ios65Dir, "03_reproductor_1284x2778.png") });
 
@@ -178,11 +196,25 @@ async function main() {
     await p2.screenshot({ path: path.join(ios67Dir, "02_canales_1290x2796.png") });
 
     try {
-      const channelBtn = p2.locator(".channel-card, .channel-item, button").filter({ hasText: /TELENOSTALGIA/i }).first();
-      if (await channelBtn.isVisible()) {
-        await channelBtn.click();
-        await p2.waitForTimeout(4000);
+      // 1. Click "Canales en Vivo" on the HomeView to open PlayerView
+      const openLiveBtn = p2.locator("button.launcher-feature, button.launcher-play").filter({ hasText: /Canales en Vivo/i }).first();
+      if (await openLiveBtn.isVisible()) {
+        await openLiveBtn.click();
+        await p2.waitForTimeout(1000);
+      } else {
+        const playBtn = p2.locator("button.launcher-play").first();
+        if (await playBtn.isVisible()) await playBtn.click();
+        await p2.waitForTimeout(1000);
       }
+
+      // 2. Now we are in PlayerView. The sidebar might be hidden on mobile.
+      // We can force-open the dock or just evaluate JS to play the channel.
+      await p2.evaluate(() => {
+        // Find the first channel button in the DOM and click it, even if hidden
+        const btn = Array.from(document.querySelectorAll("button")).find(b => b.textContent.includes("GOLDEN PLUS HD"));
+        if (btn) btn.click();
+      });
+      await p2.waitForTimeout(4000);
     } catch {}
     await p2.screenshot({ path: path.join(ios67Dir, "03_reproductor_1290x2796.png") });
 
@@ -205,11 +237,25 @@ async function main() {
     await pIpadV.screenshot({ path: path.join(ipadDir, "01_ipad_canales_2048x2732.png") });
 
     try {
-      const channelBtn = pIpadV.locator(".channel-card, .channel-item, button").filter({ hasText: /TELENOSTALGIA/i }).first();
-      if (await channelBtn.isVisible()) {
-        await channelBtn.click();
-        await pIpadV.waitForTimeout(4000);
+      // 1. Click "Canales en Vivo" on the HomeView to open PlayerView
+      const openLiveBtn = pIpadV.locator("button.launcher-feature, button.launcher-play").filter({ hasText: /Canales en Vivo/i }).first();
+      if (await openLiveBtn.isVisible()) {
+        await openLiveBtn.click();
+        await pIpadV.waitForTimeout(1000);
+      } else {
+        const playBtn = pIpadV.locator("button.launcher-play").first();
+        if (await playBtn.isVisible()) await playBtn.click();
+        await pIpadV.waitForTimeout(1000);
       }
+
+      // 2. Now we are in PlayerView. The sidebar might be hidden on mobile.
+      // We can force-open the dock or just evaluate JS to play the channel.
+      await pIpadV.evaluate(() => {
+        // Find the first channel button in the DOM and click it, even if hidden
+        const btn = Array.from(document.querySelectorAll("button")).find(b => b.textContent.includes("GOLDEN PLUS HD"));
+        if (btn) btn.click();
+      });
+      await pIpadV.waitForTimeout(4000);
     } catch {}
     await pIpadV.screenshot({ path: path.join(ipadDir, "03_ipad_reproductor_2048x2732.png") });
 
@@ -228,11 +274,25 @@ async function main() {
     await pIpadH.screenshot({ path: path.join(ipadDir, "02_ipad_horizontal_2732x2048.png") });
 
     try {
-      const channelBtn = pIpadH.locator(".channel-card, .channel-item, button").filter({ hasText: /TELENOSTALGIA/i }).first();
-      if (await channelBtn.isVisible()) {
-        await channelBtn.click();
-        await pIpadH.waitForTimeout(4000);
+      // 1. Click "Canales en Vivo" on the HomeView to open PlayerView
+      const openLiveBtn = pIpadH.locator("button.launcher-feature, button.launcher-play").filter({ hasText: /Canales en Vivo/i }).first();
+      if (await openLiveBtn.isVisible()) {
+        await openLiveBtn.click();
+        await pIpadH.waitForTimeout(1000);
+      } else {
+        const playBtn = pIpadH.locator("button.launcher-play").first();
+        if (await playBtn.isVisible()) await playBtn.click();
+        await pIpadH.waitForTimeout(1000);
       }
+
+      // 2. Now we are in PlayerView. The sidebar might be hidden on mobile.
+      // We can force-open the dock or just evaluate JS to play the channel.
+      await pIpadH.evaluate(() => {
+        // Find the first channel button in the DOM and click it, even if hidden
+        const btn = Array.from(document.querySelectorAll("button")).find(b => b.textContent.includes("GOLDEN PLUS HD"));
+        if (btn) btn.click();
+      });
+      await pIpadH.waitForTimeout(4000);
     } catch {}
     await pIpadH.screenshot({ path: path.join(ipadDir, "04_ipad_horizontal_reproductor_2732x2048.png") });
 
@@ -261,11 +321,25 @@ async function main() {
     await p2.screenshot({ path: path.join(gplayDir, "02_phone_canales_1080x2400.png") });
 
     try {
-      const channelBtn = p2.locator(".channel-card, .channel-item, button").filter({ hasText: /TELENOSTALGIA/i }).first();
-      if (await channelBtn.isVisible()) {
-        await channelBtn.click();
-        await p2.waitForTimeout(4000);
+      // 1. Click "Canales en Vivo" on the HomeView to open PlayerView
+      const openLiveBtn = p2.locator("button.launcher-feature, button.launcher-play").filter({ hasText: /Canales en Vivo/i }).first();
+      if (await openLiveBtn.isVisible()) {
+        await openLiveBtn.click();
+        await p2.waitForTimeout(1000);
+      } else {
+        const playBtn = p2.locator("button.launcher-play").first();
+        if (await playBtn.isVisible()) await playBtn.click();
+        await p2.waitForTimeout(1000);
       }
+
+      // 2. Now we are in PlayerView. The sidebar might be hidden on mobile.
+      // We can force-open the dock or just evaluate JS to play the channel.
+      await p2.evaluate(() => {
+        // Find the first channel button in the DOM and click it, even if hidden
+        const btn = Array.from(document.querySelectorAll("button")).find(b => b.textContent.includes("GOLDEN PLUS HD"));
+        if (btn) btn.click();
+      });
+      await p2.waitForTimeout(4000);
     } catch {}
     await p2.screenshot({ path: path.join(gplayDir, "03_phone_reproductor_1080x2400.png") });
 
